@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Fotobox</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <header>
@@ -25,6 +25,11 @@
     </section>
 
     <div id="app" hidden>
+    <section class="presence">
+      <button id="leitung-toggle" class="presence-btn" title="Umschalten">Spielleitung inaktiv</button>
+      <span id="pi-presence" class="presence-pill">Fotobox inaktiv</span>
+    </section>
+
     <section id="stage" class="stage">
       <div id="countdown" class="countdown" hidden></div>
       <p id="message" class="message">Verbinde …</p>
@@ -49,9 +54,9 @@
       <div id="problems-list" class="problems"></div>
     </section>
 
-    <section id="chat-panel" class="panel" hidden>
-      <h2>Nachricht an die Fotobox <span class="optional">optional</span></h2>
-      <p class="hint">Der Text erscheint auf der Fotobox. Ein neuer Text ersetzt den vorherigen. Die Fotobox kann mit OK, Egal oder Neustart antworten.</p>
+    <section id="chat-panel" class="panel">
+      <h2>Nachricht an die Fotobox <span class="optional">jederzeit möglich</span></h2>
+      <p class="hint">Der Text erscheint sofort auf der Fotobox, während einer Aufnahme direkt danach. Ein neuer Text ersetzt den vorherigen. Die Fotobox kann mit OK, Egal oder Neustart antworten.</p>
       <textarea id="chat-text" maxlength="300" rows="3" placeholder="Text an die Fotobox …"></textarea>
       <div class="row">
         <button id="chat-send" class="btn primary">Senden</button>
@@ -112,6 +117,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

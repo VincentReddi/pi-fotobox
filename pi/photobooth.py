@@ -390,8 +390,42 @@ class Backchannel(threading.Thread):
         return self.publish({"type": "problem", "session": self.session, "id": f"{time.time():.3f}",
                              "kind": kind, "task": int(task), "letter": letter, "at": int(time.time() * 1000)})
 
+    def presence(self, active):
+        """Pi aktiv / inaktiv – die Webseite zeigt es der Spielleitung an."""
+        return self.publish({"type": "presence", "who": "pi", "active": bool(active), "at": int(time.time() * 1000)})
+
+    def restore_state(self):
+        """Nach einem (Neu-)Start: letzte Nachricht und Aktiv-Status der Spielleitung wiederherstellen
+        (ntfy.sh hält Nachrichten 12 h vor)."""
+        try:
+            r = requests.get(f"{NTFY}/{self.topic}/json", params={"poll": "1", "since": "12h"}, timeout=15)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            print(f"Rückkanal: Wiederherstellen fehlgeschlagen ({e})")
+            return
+        last_message = last_presence = None
+        for line in r.text.splitlines():
+            try:
+                data = json.loads(json.loads(line).get("message") or "null")
+            except ValueError:
+                continue
+            if isinstance(data, dict) and data.get("type") == "message":
+                last_message = data
+            elif isinstance(data, dict) and data.get("type") == "presence" and data.get("who") == "leitung":
+                last_presence = data
+        if last_message:
+            self.handle_message(last_message)
+        if last_presence:
+            self.on_event("presence", last_presence.get("active") is True)
+
+    def handle_message(self, data):
+        text = str(data.get("text", "")).replace("\r", "").strip()[:300]
+        self.on_event("message", {"id": str(data.get("id", ""))[:40], "text": text})
+
     def run(self):
         self.hello()
+        self.presence(False)  # frisch gestartet = erst mal inaktiv, bis am Pi "Pi aktiv" gedrückt wird
+        self.restore_state()
         while True:
             try:
                 with requests.get(f"{NTFY}/{self.topic}/json", params={"since": self.since},
@@ -414,8 +448,15 @@ class Backchannel(threading.Thread):
 
     def handle(self, msg):
         data = json.loads(msg.get("message") or "null")
+        # Unabhängig von der Runde: Löschen, Nachrichten (immer möglich) und Aktiv-Status der Spielleitung
         if isinstance(data, dict) and data.get("type") == "clear_archive":
-            self.handle_clear(data)  # gilt unabhängig von der Runde
+            self.handle_clear(data)
+            return
+        if isinstance(data, dict) and data.get("type") == "message":
+            self.handle_message(data)
+            return
+        if isinstance(data, dict) and data.get("type") == "presence" and data.get("who") == "leitung":
+            self.on_event("presence", data.get("active") is True)
             return
         if not isinstance(data, dict) or not self.session or data.get("session") != self.session:
             return
@@ -431,9 +472,6 @@ class Backchannel(threading.Thread):
             meta = {"caption": caption, "received": int(time.time()), "upload": upload, "help": help_image}
             path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
             self.on_event("image", str(path), caption, upload, help_image)
-        elif data.get("type") == "message":
-            text = str(data.get("text", "")).replace("\r", "").strip()[:300]
-            self.on_event("message", {"id": str(data.get("id", ""))[:40], "text": text})
 
     def handle_clear(self, data):
         """Spielleitung will alle gespeicherten Bilder löschen – nur mit richtigem Lösch-Passwort."""

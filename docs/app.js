@@ -261,8 +261,6 @@ function renderAdmin() {
   if (!show) return;
   $("review-panel").classList.toggle("highlight", status.state === "confirm");
   $("images-panel").classList.toggle("highlight", status.state === "images");
-  $("chat-panel").hidden = status.state !== "images"; // Nachrichten nur in der Bildphase
-  renderChat();
   renderProblems();
   renderTaskList();
   updateUploadButton(); // die Liste selbst nicht neu bauen – sonst verliert ein gerade getipptes Namensfeld den Fokus
@@ -290,6 +288,8 @@ function startApp() {
   }
   connectLive();
   connectBack();
+  renderChat();
+  renderPresence();
   setTimeout(loadArchive, 3000);
   setInterval(updateStage, 200);
 }
@@ -386,14 +386,36 @@ $("send-review").onclick = async () => {
   }
 };
 
-// --- Nachricht an die Fotobox (Bildphase) + Antworten OK / Egal / Neustart ---
+// --- Nachricht an die Fotobox (jederzeit) + Antworten OK / Egal / Neustart, Aktiv-Status, Meldungen ---
 // Die Seite liest den Rückkanal mit: so sieht jedes Gerät der Spielleitung die aktuelle Nachricht und alle Antworten.
-// session -> { message: {id, text}, replies: [{message_id, answer, at}], problems: [{id, kind, task, letter, at}] }
-const chats = {};
+const chat = { message: null, replies: [] }; // unabhängig von der Runde: {id, text} + [{message_id, answer, at}]
+const presence = { leitung: false, pi: false }; // Aktiv-Knöpfe von Spielleitung und Fotobox
+const chats = {}; // session -> { problems: [{id, kind, task, letter, at}] }
 
 function chatFor(session) {
-  return (chats[session] ||= { message: null, replies: [], problems: [] });
+  return (chats[session] ||= { problems: [] });
 }
+
+function renderPresence() {
+  const button = $("leitung-toggle");
+  button.textContent = presence.leitung ? "✓ Spielleitung aktiv" : "Spielleitung inaktiv";
+  button.classList.toggle("on", presence.leitung);
+  const pill = $("pi-presence");
+  pill.textContent = presence.pi ? "Fotobox aktiv" : "Fotobox inaktiv";
+  pill.classList.toggle("on", presence.pi);
+}
+
+$("leitung-toggle").onclick = async () => {
+  const active = !presence.leitung;
+  presence.leitung = active; // sofort anzeigen, das Echo aus dem Rückkanal bestätigt es
+  renderPresence();
+  try {
+    await publishBack({ type: "presence", who: "leitung", active, at: Date.now() });
+  } catch {
+    presence.leitung = !active;
+    renderPresence();
+  }
+};
 
 function connectBack() {
   const es = new EventSource(`${CONFIG.ntfy}/${backTopic}/sse?since=12h`);
@@ -411,22 +433,30 @@ function connectBack() {
       if (pending) pending(data);
       return;
     }
-    if (!data || typeof data.session !== "string") return;
-    const chat = chatFor(data.session);
-    if (data.type === "message" && typeof data.text === "string") {
-      chat.message = data.text ? { id: String(data.id), text: data.text } : null;
-    } else if (data.type === "reply" && ["OK", "Egal", "Neustart"].includes(data.answer)) {
-      chat.replies.push({ message_id: String(data.message_id), answer: data.answer, at: Number(data.at) || Date.now() });
-    } else if (data.type === "problem" && PROBLEM_TEXT[data.kind] && isSmallInt(data.task) &&
-               /^[A-Z]?$/.test(data.letter ?? "")) {
-      chat.problems.push({ id: String(data.id), kind: data.kind, task: data.task, letter: data.letter || "",
-                           at: Number(data.at) || Date.now() });
-    } else {
+    if (!data) return;
+    // unabhängig von der Runde
+    if (data.type === "presence" && (data.who === "leitung" || data.who === "pi")) {
+      presence[data.who] = data.active === true;
+      renderPresence();
       return;
     }
-    if (status && data.session === status.session) {
+    if (data.type === "message" && typeof data.text === "string") {
+      chat.message = data.text ? { id: String(data.id), text: data.text } : null;
       renderChat();
-      renderProblems();
+      return;
+    }
+    if (data.type === "reply" && ["OK", "Egal", "Neustart"].includes(data.answer)) {
+      chat.replies.push({ message_id: String(data.message_id), answer: data.answer, at: Number(data.at) || Date.now() });
+      renderChat();
+      return;
+    }
+    // gehört zu einer Runde
+    if (typeof data.session !== "string") return;
+    if (data.type === "problem" && PROBLEM_TEXT[data.kind] && isSmallInt(data.task) &&
+        /^[A-Z]?$/.test(data.letter ?? "")) {
+      chatFor(data.session).problems.push({ id: String(data.id), kind: data.kind, task: data.task,
+                                            letter: data.letter || "", at: Number(data.at) || Date.now() });
+      if (status && data.session === status.session) renderProblems();
     }
   };
 }
@@ -466,8 +496,7 @@ function renderProblems() {
 const formatTime = (ms) => new Date(ms).toLocaleTimeString("de-DE");
 
 function renderChat() {
-  if (!status || !status.session) return;
-  const { message, replies } = chatFor(status.session);
+  const { message, replies } = chat;
   $("chat-current").hidden = !message;
   $("chat-clear").hidden = !message;
   if (message) $("chat-current-text").textContent = message.text;
@@ -495,7 +524,7 @@ function renderChat() {
 async function sendChat(text) {
   $("chat-send").disabled = $("chat-clear").disabled = true;
   try {
-    await publishBack({ type: "message", session: status.session, id: Date.now().toString(36), text });
+    await publishBack({ type: "message", session: status?.session ?? "", id: Date.now().toString(36), text });
     $("chat-status").textContent = text ? "Gesendet ✓" : "Nachricht entfernt";
     if (text) $("chat-text").value = "";
   } catch (err) {

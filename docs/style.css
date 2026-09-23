@@ -50,6 +50,18 @@ button { font: inherit; }
 
 main { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 
+.presence { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.presence-btn, .presence-pill {
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 700;
+  border: 2px solid #3a3f48;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.presence-btn { cursor: pointer; }
+.presence-btn.on, .presence-pill.on { background: var(--green); border-color: var(--green); color: #0b2415; }
+
 .stage {
   background: var(--panel);
   border-radius: 16px;

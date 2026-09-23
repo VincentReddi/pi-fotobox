@@ -6,7 +6,8 @@ Ablauf einer Runde:
   → (Fotos nachschicken → …) → Weiter → Warten auf Bilder → Bilder ansehen → Neue Runde
 Bildbetrachter: links/rechts tippen oder wischen = blättern, ☰ unten links = Menü (Neue Runde),
 ✉ unten rechts = Nachricht der Spielleitung (Antwort OK / Egal / Neustart).
-Startbildschirm: "Bilder" oben links = alle je empfangenen Bilder am Stück (bleiben auch nach Neustarts
+Nachrichten der Spielleitung können jederzeit kommen (Fenster oben, ✉ öffnet sie wieder).
+Startbildschirm: "Pi aktiv" umschalten + Anzeige "Spielleitung aktiv/inaktiv"; "Bilder" oben links = alle je empfangenen Bilder am Stück (bleiben auch nach Neustarts
 gespeichert; die Spielleitung kann sie über die Webseite mit dem Lösch-Passwort löschen).
 Beenden: Escape-Taste oder das ⏻ oben rechts 3 Sekunden gedrückt halten.
 """
@@ -75,6 +76,9 @@ class App:
         self.report_task = 1
         self.report_letter = 0  # Index in LETTERS, 0 = kein Buchstabe
         self.report_busy = False
+        self.chat_pending = False  # Nachricht kam während der Aufnahme -> danach zeigen
+        self.pi_active = False  # "Pi aktiv" (am Pi umschaltbar, die Webseite zeigt es an)
+        self.leitung_active = False  # "Spielleitung aktiv" (von der Webseite)
 
         root.title("Pi Fotobox")
         root.configure(bg=BG, cursor="none")
@@ -95,6 +99,11 @@ class App:
         self.f_caption = (font, max(14, H // 16), "bold")
         self.f_counter = (font, max(8, H // 40))
 
+        # 16:9-Bildbereich über die volle Breite, darunter die Überschrift (auf 640×480: 640×360 + 120 px)
+        self.img_h = int(min(self.W * 9 / 16, self.H * 0.8))
+        self.img_w = int(self.img_h * 16 / 9)
+        self.small = max(36, self.H // 10)  # Kantenlänge der kleinen Eck-Knöpfe (☰, ✉)
+
         self.frames = {}
         for name in ("message", "setup", "capture", "confirm", "wait_images", "viewer", "report"):
             frame = tk.Frame(root, bg=BG)
@@ -112,6 +121,7 @@ class App:
         self.power.place(relx=1.0, x=-10, y=6, anchor="ne")
         self.power.bind("<ButtonPress-1>", self.power_down)
         self.power.bind("<ButtonRelease-1>", self.power_up)
+        self.build_chat_overlay()
 
         self.show_message("Einen Moment …", "Kamera und Verbindung werden vorbereitet")
         threading.Thread(target=self.init_backend, daemon=True).start()
@@ -171,12 +181,17 @@ class App:
         return button
 
     def show(self, name):
+        if name != self.screen:
+            self.hide_overlays()
         self.screen = name
         self.frames[name].tkraise()
         if name == "viewer":
             self.power.lower()  # im Bildbetrachter nur Bild + Überschrift
         else:
             self.power.lift()
+        self.update_mail_button()
+        if self.chat_overlay.winfo_ismapped():
+            self.chat_overlay.lift()
 
     # ---------- Bildschirme ----------
 
@@ -207,22 +222,29 @@ class App:
 
     def build_setup(self):
         f = self.frames["setup"]
-        self.label(f, self.f_title, text="Pi Fotobox").place(relx=0.5, rely=0.09, anchor="center")
-        self.label(f, self.f_medium, fg=MUTED, text="Aufgaben").place(relx=0.5, rely=0.225, anchor="center")
+        self.label(f, self.f_title, text="Pi Fotobox").place(relx=0.5, rely=0.075, anchor="center")
+        tasks_caption = self.label(f, self.f_medium, fg=MUTED, text="Aufgaben")
+        tasks_caption.place(relx=0.5, rely=0.185, anchor="center")
         kw = dict(repeatdelay=400, repeatinterval=120)  # gedrückt halten = schnell zählen
         self.button(f, "−", GREY, self.f_value, lambda: self.change_tasks(-1), **kw).place(
-            relx=0.2, rely=0.46, relwidth=0.22, relheight=0.21, anchor="center")
+            relx=0.2, rely=0.39, relwidth=0.22, relheight=0.19, anchor="center")
         self.button(f, "+", GREY, self.f_value, lambda: self.change_tasks(+1), **kw).place(
-            relx=0.8, rely=0.46, relwidth=0.22, relheight=0.21, anchor="center")
+            relx=0.8, rely=0.39, relwidth=0.22, relheight=0.19, anchor="center")
         self.tasks_label = self.label(f, self.f_value, fg=ACCENT)
-        self.tasks_label.place(relx=0.5, rely=0.46, anchor="center")
+        self.tasks_label.place(relx=0.5, rely=0.39, anchor="center")
+        tasks_caption.lift()  # die hohe Zahl darf die Beschriftung nicht überdecken
         self.button(f, "Starten", GREEN, self.f_button, self.start_round).place(
-            relx=0.5, rely=0.77, relwidth=0.8, relheight=0.25, anchor="center")
+            relx=0.5, rely=0.625, relwidth=0.8, relheight=0.2, anchor="center")
+        # Aktiv-Status: links der eigene Umschalter, rechts die Anzeige für die Spielleitung
+        self.pi_button = self.button(f, "", GREY, self.f_info_bold, self.toggle_pi_active)
+        self.pi_button.place(relx=0.27, rely=0.845, relwidth=0.44, relheight=0.13, anchor="center")
+        self.leitung_label = tk.Label(f, font=self.f_info_bold, fg="white", bg=GREY)
+        self.leitung_label.place(relx=0.73, rely=0.845, relwidth=0.44, relheight=0.13, anchor="center")
+        self.update_presence()
         self.setup_info = self.label(f, self.f_info, fg=MUTED)
-        self.setup_info.place(relx=0.5, rely=0.955, anchor="center")
-        size = max(36, self.H // 10)
+        self.setup_info.place(relx=0.5, rely=0.96, anchor="center")
         self.button(f, "Bilder", GREY, self.f_info_bold, self.show_archive).place(
-            x=8, y=8, width=int(self.W * 0.2), height=size)
+            x=8, y=8, width=int(self.W * 0.2), height=self.small)
 
     def show_setup(self):
         if self.tasks is None:
@@ -230,6 +252,27 @@ class App:
         self.tasks_label.config(text=str(self.tasks))
         self.setup_info.config(text=f"{self.cfg['count']} Fotos · {self.cfg['countdown']} s Countdown")
         self.show("setup")
+
+    def update_presence(self):
+        color = GREEN if self.pi_active else GREY
+        self.pi_button.config(text="Pi aktiv" if self.pi_active else "Pi inaktiv", bg=color, activebackground=color)
+        self.leitung_label.config(text="Spielleitung aktiv" if self.leitung_active else "Spielleitung inaktiv",
+                                  bg=GREEN if self.leitung_active else GREY)
+
+    def leitung_text(self):
+        return "Spielleitung aktiv" if self.leitung_active else "Spielleitung inaktiv"
+
+    def toggle_pi_active(self):
+        if not self.backchannel:
+            return
+        self.pi_active = not self.pi_active
+        self.update_presence()
+        active = self.pi_active
+
+        def worker():
+            self.events.put(("presence_sent", active, self.backchannel.presence(active)))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def change_tasks(self, delta):
         self.tasks = max(TASKS_MIN, min(TASKS_MAX, self.tasks + delta))
@@ -257,30 +300,33 @@ class App:
         self.conf_title.place(relx=0.5, rely=0.1, anchor="center")
         self.conf_status = self.label(f, self.f_medium, wraplength=self.W - 40)
         self.conf_status.place(relx=0.5, rely=0.33, anchor="center")
-        self.conf_info = self.label(f, self.f_info, fg=MUTED, wraplength=self.W - 40)
+        self.conf_info = self.label(f, self.f_info, fg=MUTED, wraplength=self.W - 2 * (self.small + 24))
         self.conf_info.place(relx=0.5, rely=0.53, anchor="center")
         self.resend_button = self.button(f, "", BLUE, self.f_button_small, self.resend)
         self.resend_button.place(relx=0.265, rely=0.79, relwidth=0.45, relheight=0.3, anchor="center")
         self.button(f, "Weiter", GREEN, self.f_button, self.go_images).place(
             relx=0.735, rely=0.79, relwidth=0.45, relheight=0.3, anchor="center")
 
+    def set_conf_title(self, text):
+        # lange Überschriften ("Warte auf Rückmeldung …") in kleinerer Schrift, sonst ragen sie über den Rand
+        self.conf_title.config(text=text, font=self.f_title if len(text) <= 14 else self.f_medium)
+
     def show_confirm(self):
         if self.review is None:
-            self.conf_title.config(text="Warte auf Rückmeldung …")
+            self.set_conf_title("Warte auf Rückmeldung …")
             self.conf_status.config(text="Die Spielleitung prüft die Aufgaben", fg=MUTED)
         elif not self.review["missing"]:
-            self.conf_title.config(text="Rückmeldung")
+            self.set_conf_title("Rückmeldung")
             self.conf_status.config(text="✓ Alle Aufgaben angekommen", fg=GREEN)
         else:
             missing = ", ".join(str(n) for n in self.review["missing"])
             words = "fehlt: Aufgabe" if len(self.review["missing"]) == 1 else "fehlen: Aufgaben"
-            self.conf_title.config(text="Rückmeldung")
+            self.set_conf_title("Rückmeldung")
             self.conf_status.config(text=f"Es {words} {missing}", fg=ACCENT)
         info = f"{self.session.tasks} Aufgaben · {self.session.captured} Fotos gesendet"
         if self.images:
             info += f" · {len(self.images)} {'Bild' if len(self.images) == 1 else 'Bilder'} empfangen"
-        if not self.backchannel:
-            info += "\nRückkanal aus: web_password fehlt in config.json"
+        info += f"\n{self.leitung_text()}" if self.backchannel else "\nRückkanal aus: web_password fehlt in config.json"
         self.conf_info.config(text=info)
         self.resend_button.config(text=f"{self.cfg['resend_count']} Fotos\nnachschicken")
         self.show("confirm")
@@ -312,6 +358,55 @@ class App:
         self.chat_widgets.append((text, status))
         return panel
 
+    # ✉ zum Wiederöffnen – je Bildschirm dort, wo Platz ist (Warte-Bildschirm zeigt die Nachricht direkt)
+    MAIL_SPOTS = {
+        "viewer": dict(relx=1.0, x=-8, rely=1.0, y=-8, anchor="se"),
+        "setup": dict(x=8, y=None, anchor="nw"),  # unter "Bilder"
+        "confirm": dict(x=8, rely=0.53, anchor="w"),
+    }
+
+    def build_chat_overlay(self):
+        """Nachricht der Spielleitung als Fenster über dem oberen Bereich – auf jedem Bildschirm."""
+        self.chat_overlay = tk.Frame(self.root, bg=BG, highlightthickness=2, highlightbackground=GREY)
+        self.build_chat_panel(self.chat_overlay).place(x=0, y=0, relwidth=1, relheight=1)
+        size = self.small
+        self.button(self.chat_overlay, "✕", GREY, self.f_info, self.hide_overlays).place(
+            relx=1.0, x=-6, y=6, width=size - 8, height=size - 8, anchor="ne")
+        self.mail_button = self.button(self.root, "✉", ACCENT, self.f_button_small, self.toggle_chat)
+
+    def update_mail_button(self):
+        spot = self.MAIL_SPOTS.get(self.screen)
+        if self.chat and spot and not self.busy:
+            color = GREY if self.chat_answered else ACCENT  # rot = noch nicht beantwortet
+            self.mail_button.config(bg=color, activebackground=color)
+            spot = dict(spot)
+            if spot.get("y", 0) is None:
+                spot["y"] = 8 + self.small + 8
+            self.mail_button.place(width=self.small, height=self.small, **spot)
+            self.mail_button.lift()
+        else:
+            self.mail_button.place_forget()
+
+    def show_chat_overlay(self):
+        if not self.chat:
+            return
+        if self.busy:  # nicht über den Countdown legen – nach den Fotos zeigen
+            self.chat_pending = True
+            return
+        if self.screen == "wait_images":  # dort steht die Nachricht schon direkt auf dem Bildschirm
+            self.show_wait_images()
+            return
+        for w in (self.menu_live, self.menu_archive):
+            w.place_forget()
+        self.chat_overlay.place(x=0, y=0, width=self.W, height=self.img_h)
+        self.chat_overlay.lift()
+
+    def toggle_chat(self):
+        if self.chat_overlay.winfo_ismapped():
+            self.hide_overlays()
+        else:
+            self.show_chat_overlay()
+
     def update_chat(self):
         text = tk_safe(self.chat["text"]) if self.chat else ""
         font = self.f_chat[0] if len(text) <= 45 else self.f_chat[1] if len(text) <= 120 else self.f_chat[2]
@@ -326,8 +421,8 @@ class App:
             self.wait_chat.place(relx=0.5, rely=0.14, relwidth=1, relheight=0.66, anchor="n")
         else:
             self.wait_chat.place_forget()
-            self.wait_info.config(text="Die Spielleitung schickt die Bilder über die Webseite" if self.backchannel
-                                  else "Rückkanal aus: web_password fehlt in config.json")
+            self.wait_info.config(text=f"Die Spielleitung schickt die Bilder über die Webseite\n{self.leitung_text()}"
+                                  if self.backchannel else "Rückkanal aus: web_password fehlt in config.json")
             self.wait_info.place(relx=0.5, rely=0.45, anchor="center")
         self.show("wait_images")
 
@@ -353,15 +448,10 @@ class App:
         self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self.canvas.bind("<ButtonPress-1>", self.viewer_press)
         self.canvas.bind("<ButtonRelease-1>", self.viewer_release)
-        # 16:9-Bild über die volle Breite, darunter die Überschrift (auf 640×480: 640×360 + 120 px)
-        self.img_h = int(min(self.W * 9 / 16, self.H * 0.8))
-        self.img_w = int(self.img_h * 16 / 9)
         # Kleine Knöpfe in den unteren Ecken – die Überschrift dazwischen bleibt immer frei lesbar
-        size = max(36, self.H // 10)
+        size = self.small
         self.button(f, "☰", GREY, self.f_button_small, self.toggle_menu).place(
             x=8, rely=1.0, y=-8, width=size, height=size, anchor="sw")
-        self.mail_button = self.button(f, "✉", ACCENT, self.f_button_small, self.toggle_chat)
-        self.mail_size = size
         self.caption_width = self.W - 2 * (size + 16)
         # Menüs und Nachricht erscheinen über dem Bild, nie über der Überschrift
         self.menu_live = tk.Frame(f, bg=BG, highlightthickness=2, highlightbackground=GREY)
@@ -371,10 +461,6 @@ class App:
         self.menu_archive = tk.Frame(f, bg=BG, highlightthickness=2, highlightbackground=GREY)
         self.menu_buttons(self.menu_archive, (("Startbildschirm", GREEN, self.leave_archive),
                                               ("Zurück zum Bild", GREY, self.hide_overlays)))
-        self.chat_overlay = tk.Frame(f, bg=BG, highlightthickness=2, highlightbackground=GREY)
-        self.build_chat_panel(self.chat_overlay).place(x=0, y=0, relwidth=1, relheight=1)
-        self.button(self.chat_overlay, "✕", GREY, self.f_info, self.hide_overlays).place(
-            relx=1.0, x=-6, y=6, width=size - 8, height=size - 8, anchor="ne")
         self.press_x = 0
 
     def menu_buttons(self, frame, entries):
@@ -474,29 +560,12 @@ class App:
         self.place_overlay(menu, 0.7, 0.86 if menu is self.menu_live else 0.62)  # 3 bzw. 2 Einträge
         self.menu_timer = self.root.after(8000, self.hide_overlays)
 
-    def toggle_chat(self):
-        if self.chat_overlay.winfo_ismapped():
-            self.hide_overlays()
-        elif self.chat:
-            self.place_overlay(self.chat_overlay, 1.0, 1.0)
-
     def hide_overlays(self):
         if self.menu_timer:
             self.root.after_cancel(self.menu_timer)
             self.menu_timer = None
         for w in (self.menu_live, self.menu_archive, self.chat_overlay):
             w.place_forget()
-
-    def update_mail_button(self):
-        if self.chat and self.viewer_mode == "live":
-            color = GREY if self.chat_answered else ACCENT  # rot = noch nicht beantwortet
-            self.mail_button.config(bg=color, activebackground=color)
-            self.mail_button.place(relx=1.0, x=-8, rely=1.0, y=-8, width=self.mail_size, height=self.mail_size,
-                                   anchor="se")
-        else:
-            self.mail_button.place_forget()
-            if self.chat_overlay.winfo_ismapped():
-                self.hide_overlays()
 
     # ---------- Problem melden (Notfall): Aufgabe fehlt / nicht lösbar + Nummer + optional Buchstabe ----------
 
@@ -615,8 +684,6 @@ class App:
         self.images = []
         self.image_index = 0
         self.last_upload = None
-        self.chat = None
-        self.update_chat()
         if self.backchannel:
             self.backchannel.session = self.session.id
             threading.Thread(target=self.backchannel.hello, daemon=True).start()
@@ -720,6 +787,9 @@ class App:
             self.busy = False
             self.phase = None
             self.show_confirm()
+            if self.chat_pending:  # Nachricht kam während der Aufnahme
+                self.chat_pending = False
+                self.show_chat_overlay()
         elif kind == "error":
             self.busy = False
             self.phase = None
@@ -751,8 +821,10 @@ class App:
             self.update_chat()
             if self.screen == "wait_images":
                 self.show_wait_images()
-            elif self.chat and self.screen == "viewer" and self.viewer_mode == "live":
-                self.place_overlay(self.chat_overlay, 1.0, 1.0)  # neue Nachricht sofort zeigen
+            elif self.chat:
+                self.show_chat_overlay()  # neue Nachricht sofort zeigen (während der Aufnahme: danach)
+            else:
+                self.hide_overlays()  # Spielleitung hat die Nachricht entfernt
         elif kind == "report_sent":
             ok, text = args
             self.report_busy = False
@@ -775,6 +847,18 @@ class App:
                     self.show_images()
             elif self.screen == "confirm":
                 self.show_confirm()
+        elif kind == "presence":
+            self.leitung_active = args[0]
+            self.update_presence()
+            if self.screen == "confirm":
+                self.show_confirm()
+            elif self.screen == "wait_images":
+                self.show_wait_images()
+        elif kind == "presence_sent":
+            active, ok = args
+            if not ok and self.pi_active == active:  # nicht angekommen -> zurückschalten
+                self.pi_active = not active
+                self.update_presence()
         elif kind == "reply_sent":
             answer, ok, at = args
             if ok:
