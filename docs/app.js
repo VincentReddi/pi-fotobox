@@ -256,11 +256,7 @@ async function publishBack(payload) {
 }
 
 function renderAdmin() {
-  const admin = !!backTopic;
-  $("login-btn").textContent = admin ? "Spielleitung ✓" : "Spielleitung";
-  $("login-btn").title = admin ? "Abmelden" : "Als Spielleitung anmelden";
-  $("login-btn").classList.toggle("active", admin);
-  const show = admin && status && status.session;
+  const show = !!(backTopic && status && status.session);
   $("review-panel").hidden = !(show && status.tasks);
   $("images-panel").hidden = !show;
   if (!show) return;
@@ -270,31 +266,50 @@ function renderAdmin() {
   updateUploadButton(); // die Liste selbst nicht neu bauen – sonst verliert ein gerade getipptes Namensfeld den Fokus
 }
 
-$("login-btn").onclick = () => {
-  if (backTopic) {
-    if (confirm("Als Spielleitung abmelden?")) {
-      setBackTopic(null);
-      renderAdmin();
-    }
+// Ohne Passwort zeigt die Seite nur die Anmeldung – erst danach wird überhaupt etwas geladen.
+// (Die Fotos selbst liegen trotzdem im öffentlichen GitHub-Repo.)
+function showGate() {
+  $("app").hidden = true;
+  $("logout-btn").hidden = true;
+  $("gate").hidden = false;
+  $("login-password").focus();
+}
+
+let started = false;
+function startApp() {
+  $("gate").hidden = true;
+  $("app").hidden = false;
+  $("logout-btn").hidden = false;
+  if (started) return;
+  started = true;
+  if (!CONFIG.owner || !CONFIG.repo) {
+    setMessage("Repo unbekannt – setze owner/repo in app.js oder öffne die Seite mit ?owner=…&repo=…");
     return;
   }
-  $("login-error").hidden = true;
-  $("login-password").value = "";
-  $("login-dialog").showModal();
+  connectLive();
+  setTimeout(loadArchive, 3000);
+  setInterval(updateStage, 200);
+}
+
+$("logout-btn").onclick = () => {
+  if (!confirm("Abmelden? Danach ist die Seite erst wieder mit dem Passwort sichtbar.")) return;
+  setBackTopic(null);
+  location.reload(); // Live-Verbindung, Fotos und vorbereitete Bilder komplett verwerfen
 };
-$("login-cancel").onclick = () => $("login-dialog").close();
+
 $("login-form").onsubmit = async (e) => {
   e.preventDefault();
   const password = $("login-password").value.trim();
   if (!password) return;
+  $("login-error").hidden = true;
   $("login-submit").disabled = true;
   $("login-submit").textContent = "Prüfe …";
   try {
     const topic = await deriveBackTopic(password);
     if (await verifyBackTopic(topic)) {
       setBackTopic(topic);
-      $("login-dialog").close();
-      renderAdmin();
+      $("login-password").value = "";
+      startApp();
     } else {
       $("login-error").textContent =
         "Passwort falsch – oder die Fotobox war in den letzten 12 Stunden nicht eingeschaltet.";
@@ -509,10 +524,16 @@ $("crop-ok").onclick = async () => {
   renderPrepared();
 };
 
-$("file-input").addEventListener("change", async (e) => {
-  const files = [...e.target.files];
-  e.target.value = ""; // dieselbe Datei später nochmal wählbar
-  for (const file of files) {
+// Bilder nacheinander zuschneiden – egal ob ausgewählt oder per Strg+V eingefügt
+const pendingFiles = [];
+let processingFiles = false;
+
+async function addFiles(files) {
+  pendingFiles.push(...files);
+  if (processingFiles) return; // läuft schon – neue Bilder kommen einfach hinten dran
+  processingFiles = true;
+  while (pendingFiles.length) {
+    const file = pendingFiles.shift();
     let source;
     try {
       source = await loadSource(file);
@@ -523,6 +544,22 @@ $("file-input").addEventListener("change", async (e) => {
     const item = { source, zoom: 1, cx: source.width / 2, cy: source.height / 2, caption: "", blob: null, url: null };
     await openCropper(item, true);
   }
+  processingFiles = false;
+}
+
+$("file-input").addEventListener("change", (e) => {
+  const files = [...e.target.files];
+  e.target.value = ""; // dieselbe Datei später nochmal wählbar
+  addFiles(files);
+});
+
+// Strg+V: kopiertes Bild (Screenshot, "Bild kopieren" im Browser, …) direkt übernehmen
+document.addEventListener("paste", (e) => {
+  if ($("images-panel").hidden || uploading) return;
+  const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+  if (!files.length) return; // Text normal ins Eingabefeld einfügen lassen
+  e.preventDefault();
+  addFiles(files);
 });
 
 function renderPrepared() {
@@ -646,11 +683,5 @@ document.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------- Start
 detectRepo();
 loadBackTopic();
-renderAdmin();
-if (!CONFIG.owner || !CONFIG.repo) {
-  setMessage("Repo unbekannt – setze owner/repo in app.js oder öffne die Seite mit ?owner=…&repo=…");
-} else {
-  connectLive();
-  setTimeout(loadArchive, 3000);
-  setInterval(updateStage, 200);
-}
+if (backTopic) startApp();
+else showGate();

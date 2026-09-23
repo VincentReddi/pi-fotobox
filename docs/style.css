@@ -88,6 +88,19 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 .tasks-info .ok { color: var(--green); }
 .tasks-info .missing { color: var(--accent); }
 
+/* --- Anmeldung (ohne Passwort ist sonst nichts sichtbar) --- */
+.gate { display: flex; justify-content: center; padding-top: 12vh; }
+.gate form {
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 24px;
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gate h2 { margin: 0; font-size: 1.2rem; }
+
 /* --- Spielleitung --- */
 .panel {
   background: var(--panel);
@@ -116,6 +129,17 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 .btn.secondary { background: var(--panel-2); color: var(--text); }
 .btn:disabled { opacity: .45; cursor: default; }
 .file-btn { align-self: flex-start; }
+.add-row { align-items: center; }
+kbd {
+  background: var(--panel-2);
+  border: 1px solid #3a3f48;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: .85em;
+  color: var(--text);
+}
 
 .task-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .task {

@@ -4,7 +4,7 @@
 Ablauf einer Runde:
   Aufgaben wählen (− / +) → Starten → Countdown + Fotos → Warten auf die Rückmeldung der Spielleitung
   → (Fotos nachschicken → …) → Weiter → Warten auf Bilder → Bilder ansehen → Neue Runde
-Bildbetrachter: links/rechts tippen oder wischen = blättern, Mitte tippen = Knöpfe einblenden.
+Bildbetrachter: links/rechts tippen oder wischen = blättern, ☰ unten links = Menü (Neue Runde).
 Beenden: Escape-Taste oder das ⏻ oben rechts 3 Sekunden gedrückt halten.
 """
 import queue
@@ -47,7 +47,7 @@ class App:
         self.phase = None
         self.screen = None
         self.quit_timer = None
-        self.overlay_timer = None
+        self.menu_timer = None
 
         self.session = None  # pb.Session der laufenden Runde
         self.tasks = None  # gewählte Aufgaben-Anzahl
@@ -235,11 +235,17 @@ class App:
         # 16:9-Bild über die volle Breite, darunter die Überschrift (auf 640×480: 640×360 + 120 px)
         self.img_h = int(min(self.W * 9 / 16, self.H * 0.8))
         self.img_w = int(self.img_h * 16 / 9)
-        self.overlay = tk.Frame(f, bg="black")
-        for i, (text, cmd) in enumerate((("◀", lambda: self.step(-1)), ("Neue Runde", self.new_round),
-                                         ("▶", lambda: self.step(+1)))):
-            self.button(self.overlay, text, GREY, self.f_button_small, cmd).place(
-                relx=(0.15, 0.5, 0.85)[i], rely=0.5, relwidth=(0.25, 0.4, 0.25)[i], relheight=0.8, anchor="center")
+        # Kleiner Menü-Knopf unten links – die Überschrift bleibt immer frei lesbar
+        size = max(36, self.H // 10)
+        self.button(f, "☰", GREY, self.f_button_small, self.toggle_menu).place(
+            x=8, rely=1.0, y=-8, width=size, height=size, anchor="sw")
+        self.caption_width = self.W - 2 * (size + 16)  # Abstand zu Menü-Knopf und Bildzähler
+        # Menü erscheint über dem Bild, nicht über der Überschrift
+        self.menu = tk.Frame(f, bg=BG, highlightthickness=2, highlightbackground=GREY)
+        self.button(self.menu, "Neue Runde", GREEN, self.f_button_small, self.new_round).place(
+            relx=0.5, rely=0.29, relwidth=0.86, relheight=0.38, anchor="center")
+        self.button(self.menu, "Zurück zum Bild", GREY, self.f_button_small, self.hide_menu).place(
+            relx=0.5, rely=0.73, relwidth=0.86, relheight=0.38, anchor="center")
         self.press_x = 0
 
     def show_images(self):
@@ -275,7 +281,7 @@ class App:
         caption_mid = (self.img_h + self.H) // 2
         if caption:
             c.create_text(self.W // 2, caption_mid, text=caption, fill=FG, font=self.f_caption,
-                          width=self.W - 40, justify="center")
+                          width=self.caption_width, justify="center")
         if len(self.images) > 1:
             c.create_text(self.W - 8, self.H - 6, anchor="se", fill=MUTED, font=self.f_counter,
                           text=f"{self.image_index + 1}/{len(self.images)}")
@@ -284,33 +290,33 @@ class App:
         if self.images:
             self.image_index = (self.image_index + delta) % len(self.images)
             self.render_image()
-            self.show_overlay(restart_only=True)
 
     def viewer_press(self, event):
         self.press_x = event.x
 
     def viewer_release(self, event):
+        if self.menu.winfo_ismapped():  # Tippen neben das Menü schließt es
+            self.hide_menu()
+            return
         dx = event.x - self.press_x
         if abs(dx) > self.W * 0.12:  # wischen
             self.step(-1 if dx > 0 else +1)
-        elif event.x < self.W / 3:
-            self.step(-1)
-        elif event.x > self.W * 2 / 3:
-            self.step(+1)
-        else:
-            self.show_overlay()
+        else:  # linke Hälfte = zurück, rechte Hälfte = weiter
+            self.step(-1 if event.x < self.W / 2 else +1)
 
-    def show_overlay(self, restart_only=False):
-        if restart_only and not self.overlay.winfo_ismapped():
+    def toggle_menu(self):
+        if self.menu.winfo_ismapped():
+            self.hide_menu()
             return
-        self.overlay.place(x=0, y=self.img_h, relwidth=1, height=self.H - self.img_h)
-        if self.overlay_timer:
-            self.root.after_cancel(self.overlay_timer)
-        self.overlay_timer = self.root.after(5000, self.hide_overlay)
+        self.menu.place(relx=0.5, y=self.img_h // 2, width=int(self.W * 0.7), height=int(self.img_h * 0.62),
+                        anchor="center")
+        self.menu_timer = self.root.after(8000, self.hide_menu)
 
-    def hide_overlay(self):
-        self.overlay_timer = None
-        self.overlay.place_forget()
+    def hide_menu(self):
+        if self.menu_timer:
+            self.root.after_cancel(self.menu_timer)
+            self.menu_timer = None
+        self.menu.place_forget()
 
     # ---------- Aktionen ----------
 
@@ -354,7 +360,7 @@ class App:
         self.show_images()
 
     def new_round(self):
-        self.hide_overlay()
+        self.hide_menu()
         self.show_setup()
 
     # ---------- Hintergrund ----------

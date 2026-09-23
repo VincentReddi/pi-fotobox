@@ -68,10 +68,10 @@ Bei jedem Start wird der Branch `photos` zurückgesetzt, **alle alten Fotos vers
 ### Aufgaben, Rückmeldung und Bilder zurück (Spielleitung)
 
 1. Am Pi mit **− / +** die Anzahl der Aufgaben wählen → **Starten** → 20 Fotos.
-2. Die **Spielleitung** meldet sich auf der Webseite über „Spielleitung“ mit dem Passwort an (`web_password` in `config.json`), hakt die Aufgaben ab, die auf den Fotos zu sehen sind, und sendet die Rückmeldung.
+2. Die **Spielleitung** meldet sich auf der Webseite mit dem Passwort an (`web_password` in `config.json`), hakt die Aufgaben ab, die auf den Fotos zu sehen sind, und sendet die Rückmeldung. Ohne Passwort zeigt die Webseite nur die Anmeldung. Die Fotos liegen aber trotzdem im öffentlichen GitHub-Repo.
 3. Der Pi zeigt „Alle Aufgaben angekommen“ oder „Es fehlen: Aufgaben 3, 7“. Mit **10 Fotos nachschicken** kommen weitere Fotos dazu, die auf der Webseite grün umrandet sind. **Weiter** geht jederzeit.
-4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus, schneidet sie auf **16:9** zu, gibt ihnen einen Namen und schickt sie ab.
-5. Am Pi erscheinen die Bilder mit ihrem Namen. Links oder rechts tippen bzw. wischen blättert, Tippen in die Mitte blendet **Neue Runde** ein.
+4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus oder fügt ein kopiertes Bild mit **Strg + V** ein, schneidet sie auf **16:9** zu, gibt ihnen einen Namen und schickt sie ab.
+5. Am Pi erscheinen die Bilder mit ihrem Namen. Tippen links oder rechts bzw. Wischen blättert. Der kleine **☰**-Knopf unten links öffnet das Menü mit **Neue Runde**, der Name bleibt dabei sichtbar.
 
 Technik: Rückmeldungen und Bilder laufen über einen zweiten ntfy-Kanal, dessen Name aus dem Passwort berechnet wird (SHA-256). Das Passwort selbst steht nirgends auf der Webseite. Bilder dürfen ohne ntfy-Konto maximal 2 MB groß sein (1280×720-JPEG, reicht locker) und verfallen bei ntfy.sh nach 3 Stunden. Der Pi speichert sie sofort unter `pi/fotos/<session>/empfangen/`. Für die Bildanzeige braucht der Pi `sudo apt install -y python3-pil.imagetk`.
 
