@@ -28,6 +28,7 @@ GREY = "#2a2e36"
 FLASH = "#ffffff"
 TASKS_MIN, TASKS_MAX = 1, 50
 HELLO_EVERY_MS = 6 * 3600 * 1000  # Rückkanal-"Hallo" auffrischen (ntfy.sh speichert 12 h)
+RETRY_MS = 15000  # kein Netz/keine Kamera beim Start: so oft automatisch neu versuchen
 HOLD_MS = 1500  # so lange müssen wichtige Knöpfe (Neustart, Neue Runde) gedrückt werden
 HOLD_REPLIES = ("Neustart",)  # Antworten, die Gedrückthalten brauchen
 LETTERS = ["—"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]  # optionaler Buchstabe bei "Problem melden"
@@ -123,8 +124,10 @@ class App:
         self.power.bind("<ButtonRelease-1>", self.power_up)
         self.build_chat_overlay()
 
-        self.show_message("Einen Moment …", "Kamera und Verbindung werden vorbereitet")
-        threading.Thread(target=self.init_backend, daemon=True).start()
+        self.initializing = False
+        self.retry_timer = None
+        self.hello_scheduled = False
+        self.retry_init()
         root.after(50, self.pump)
 
     # ---------- Bausteine ----------
@@ -314,15 +317,25 @@ class App:
     def show_confirm(self):
         if self.review is None:
             self.set_conf_title("Warte auf Rückmeldung …")
-            self.conf_status.config(text="Die Spielleitung prüft die Aufgaben", fg=MUTED)
+            self.conf_status.config(text="Die Spielleitung prüft die Aufgaben", fg=MUTED, font=self.f_medium)
         elif not self.review["missing"]:
             self.set_conf_title("Rückmeldung")
-            self.conf_status.config(text="✓ Alle Aufgaben angekommen", fg=GREEN)
+            self.conf_status.config(text="✓ Alle Aufgaben angekommen", fg=GREEN, font=self.f_medium)
         else:
-            missing = ", ".join(str(n) for n in self.review["missing"])
-            words = "fehlt: Aufgabe" if len(self.review["missing"]) == 1 else "fehlen: Aufgaben"
+            missing = self.review["missing"]
+            reasons = self.review.get("reasons") or {}
             self.set_conf_title("Rückmeldung")
-            self.conf_status.config(text=f"Es {words} {missing}", fg=ACCENT)
+            if reasons:  # je Aufgabe eine Zeile mit Begründung, z. B. "Aufgabe 3 – verschwommen"
+                lines = [f"Aufgabe {n} – {reasons[str(n)]}" if str(n) in reasons else f"Aufgabe {n}"
+                         for n in missing]
+                if len(lines) > 4:
+                    lines = lines[:3] + [f"… und {len(lines) - 3} weitere"]
+                font = self.f_info_bold  # mehrere Zeilen: kleinere Schrift, sonst überdecken sie Titel und Infozeile
+                self.conf_status.config(text="Es fehlt:\n" + "\n".join(lines), fg=ACCENT, font=font)
+            else:
+                words = "fehlt: Aufgabe" if len(missing) == 1 else "fehlen: Aufgaben"
+                self.conf_status.config(text=f"Es {words} {', '.join(str(n) for n in missing)}", fg=ACCENT,
+                                        font=self.f_medium)
         info = f"{self.session.tasks} Aufgaben · {self.session.captured} Fotos gesendet"
         if self.images:
             info += f" · {len(self.images)} {'Bild' if len(self.images) == 1 else 'Bilder'} empfangen"
@@ -729,21 +742,36 @@ class App:
 
     def new_round(self):
         self.hide_overlays()
+        # Aktivität zurücksetzen: Pi und Spielleitung sind wieder inaktiv, bis beide erneut "aktiv" drücken
+        self.pi_active = False
+        self.leitung_active = False
+        self.update_presence()
+        if self.backchannel:
+            threading.Thread(target=self.backchannel.reset_presence, daemon=True).start()
         self.show_setup()
 
     # ---------- Hintergrund ----------
 
     def init_backend(self):
         try:
+            self._init_backend()
+        finally:
+            self.initializing = False
+
+    def _init_backend(self):
+        try:
             if self.cfg is None:
                 self.cfg = pb.load_config()
                 self.setup_gpio_button()
+            # Kamera und GitHub getrennt: bei einem neuen Versuch wird nur nachgeholt, was noch fehlt
+            # (die Kamera darf nicht doppelt geöffnet werden, der Upload-Thread nicht doppelt laufen)
+            if self.cam is None:
+                self.cam = pb.open_camera(self.cfg)
             if self.up is None:
-                self.up, self.cam = pb.setup(self.cfg)
+                self.up = pb.connect(self.cfg)
             if self.backchannel is None and pb.back_topic(self.cfg):
                 self.backchannel = pb.Backchannel(self.cfg, lambda *ev: self.events.put(ev))
                 self.backchannel.start()
-                self.root.after(HELLO_EVERY_MS, self.refresh_hello)
             self.events.put(("ready",))
         except SystemExit as e:
             self.events.put(("fatal", str(e)))
@@ -776,6 +804,9 @@ class App:
         if kind in ("countdown", "photo", "uploading"):
             self.phase = kind
         if kind == "ready":
+            if self.backchannel and not self.hello_scheduled:  # Tk-Timer nur im Hauptthread anlegen
+                self.hello_scheduled = True
+                self.root.after(HELLO_EVERY_MS, self.refresh_hello)
             self.show_setup()
         elif kind == "trigger":
             if self.screen == "setup":
@@ -808,7 +839,10 @@ class App:
             after = self.show_confirm if self.session and self.session.captured else self.show_setup
             self.show_message("Fehler", short(args[0]), "Weiter", after)
         elif kind == "fatal":
-            self.show_message("Fotobox nicht bereit", short(args[0]), "Erneut versuchen", self.retry_init)
+            # z. B. WLAN beim Hochfahren noch nicht da: alle RETRY_MS von selbst neu versuchen
+            self.show_message("Fotobox nicht bereit", short(args[0]) + f"\nNeuer Versuch in {RETRY_MS // 1000} s …",
+                              "Erneut versuchen", self.retry_init)
+            self.retry_timer = self.root.after(RETRY_MS, self.retry_init)
         elif kind == "review":
             self.review = args[0]
             self.up.submit(self.up.set_review, self.review)  # auch allen Zuschauern auf der Webseite zeigen
@@ -881,6 +915,12 @@ class App:
             self.update_chat()
 
     def retry_init(self):
+        if self.retry_timer:
+            self.root.after_cancel(self.retry_timer)
+            self.retry_timer = None
+        if self.initializing:  # läuft schon – nicht doppelt starten (Kamera!)
+            return
+        self.initializing = True
         self.show_message("Einen Moment …", "Kamera und Verbindung werden vorbereitet")
         threading.Thread(target=self.init_backend, daemon=True).start()
 

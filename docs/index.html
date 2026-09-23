@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Fotobox</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <header>
@@ -41,6 +41,7 @@
       <h2>Aufgaben prüfen</h2>
       <p class="hint">Tippe alle Aufgaben an, die auf den Fotos zu sehen sind. Nicht markierte gelten als fehlend.</p>
       <div id="task-list" class="task-list"></div>
+      <div id="reason-list" class="reason-list" hidden></div>
       <div class="row">
         <button id="all-tasks" class="btn secondary">Alle markieren</button>
         <button id="send-review" class="btn primary"></button>
@@ -85,7 +86,10 @@
       <p id="upload-status" class="hint"></p>
     </section>
 
-    <h2 id="session-title" class="session-title" hidden></h2>
+    <div class="gallery-head">
+      <h2 id="session-title" class="session-title" hidden></h2>
+      <button id="rotate-all" class="btn secondary small" title="Alle Fotos um 90° im Uhrzeigersinn drehen" hidden>↻ Alle Fotos drehen</button>
+    </div>
     <section id="gallery" class="gallery"></section>
 
     <section id="storage-panel" class="panel">
@@ -101,6 +105,7 @@
     <button id="lb-prev" class="lb-nav" aria-label="Vorheriges Foto">‹</button>
     <img id="lb-img" alt="">
     <button id="lb-next" class="lb-nav" aria-label="Nächstes Foto">›</button>
+    <button id="lb-rotate" class="lb-rotate" aria-label="Foto drehen" title="Drehen (Taste R)">↻</button>
     <button id="lb-close" class="lb-close" aria-label="Schließen">✕</button>
   </div>
 
@@ -117,6 +122,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

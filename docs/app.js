@@ -45,7 +45,8 @@ function isValidStatus(s) {
     s.photos.every((p) => typeof p === "string" && /^sessions\/[\w-]+\/\d{3}\.jpg$/.test(p)) &&
     (s.tasks === undefined || isSmallInt(s.tasks)) &&
     (s.batch_starts === undefined || (Array.isArray(s.batch_starts) && s.batch_starts.every(isSmallInt))) &&
-    (s.review == null || (Array.isArray(s.review.missing) && s.review.missing.every(isSmallInt)))
+    (s.review == null || (Array.isArray(s.review.missing) && s.review.missing.every(isSmallInt) &&
+      (s.review.reasons == null || typeof s.review.reasons === "object")))
   );
 }
 
@@ -101,7 +102,10 @@ function render() {
   if (status.session !== shownSession) {
     shownSession = status.session;
     checked = new Set();
+    reasons = {};
     lastReviewKey = null;
+    loadRotation(status.session);
+    $("rotate-all").hidden = false;
     $("gallery").replaceChildren();
     $("session-title").hidden = false;
     $("session-title").textContent = `Session ${formatSession(status.session)}`;
@@ -164,8 +168,9 @@ function renderTasksInfo() {
     const span = document.createElement("span");
     const missing = status.review.missing;
     span.className = missing.length ? "missing" : "ok";
+    const why = status.review.reasons || {};
     span.textContent = missing.length
-      ? ` · fehlt: Aufgabe ${missing.join(", ")}`
+      ? ` · fehlt: Aufgabe ${missing.map((n) => (REASONS.includes(why[n]) ? `${n} (${why[n]})` : n)).join(", ")}`
       : " · alle Aufgaben angekommen ✓";
     el.append(span);
   }
@@ -180,14 +185,16 @@ function isResent(path) {
 }
 
 function addPhoto(path) {
+  const box = document.createElement("div");
+  box.className = "photo";
+  box.dataset.path = path;
+  if (isResent(path)) {
+    box.classList.add("resent");
+    box.title = "Nachgeschickt";
+  }
   const img = document.createElement("img");
   let attempt = 0;
-  img.dataset.path = path;
   img.alt = `Foto ${photoNumber(path)}`;
-  if (isResent(path)) {
-    img.classList.add("resent");
-    img.title = "Nachgeschickt";
-  }
   img.onload = () => img.classList.add("loaded");
   img.onerror = () => {
     // Direkt nach dem Upload liefert raw.githubusercontent.com manchmal kurz noch 404
@@ -196,9 +203,54 @@ function addPhoto(path) {
     setTimeout(() => (img.src = `${photoUrl(path)}?r=${attempt}`), 2000);
   };
   img.src = photoUrl(path);
-  img.addEventListener("click", () => openLightbox(path));
-  $("gallery").append(img);
+  box.append(img);
+  box.addEventListener("click", () => openLightbox(path));
+  applyRotation(box, path);
+  $("gallery").append(box);
 }
+
+// --- Fotos der Fotobox drehen (nur die Anzeige hier; die Dateien bleiben unverändert) ---
+// "Alle drehen" gilt für die ganze Runde (z. B. Kamera quer eingebaut), ↻ in der Großansicht für ein Foto.
+// Der Browser merkt sich das je Runde; neue Runden übernehmen die zuletzt gewählte Drehung für alle.
+let rotation = { all: 0, photos: {} };
+
+function loadRotation(session) {
+  let saved = null;
+  let fallback = 0;
+  try {
+    saved = JSON.parse(localStorage.getItem(`fotobox-rot-${session}`));
+    fallback = Number(localStorage.getItem("fotobox-rot-default")) || 0;
+  } catch {
+    // ohne Speicher: dann eben ungedreht
+  }
+  rotation = saved && typeof saved === "object"
+    ? { all: (Number(saved.all) || 0) % 4, photos: saved.photos && typeof saved.photos === "object" ? saved.photos : {} }
+    : { all: fallback % 4, photos: {} };
+}
+
+function saveRotation() {
+  try {
+    localStorage.setItem(`fotobox-rot-${status.session}`, JSON.stringify(rotation));
+    localStorage.setItem("fotobox-rot-default", String(rotation.all));
+  } catch {
+    // egal
+  }
+}
+
+const rotOf = (path) => (rotation.all + (Number(rotation.photos[path]) || 0)) % 4;
+
+function applyRotation(el, path) {
+  el.classList.remove("r1", "r2", "r3");
+  const r = rotOf(path);
+  if (r) el.classList.add(`r${r}`);
+}
+
+$("rotate-all").onclick = () => {
+  rotation.all = (rotation.all + 1) % 4; // immer 90° im Uhrzeigersinn
+  saveRotation();
+  for (const box of $("gallery").children) applyRotation(box, box.dataset.path);
+  if (!$("lightbox").hidden) applyRotation($("lb-img"), lbPaths()[lbIndex]);
+};
 
 function formatSession(s) {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
@@ -328,7 +380,9 @@ $("login-form").onsubmit = async (e) => {
 };
 
 // --- Aufgaben prüfen ---
+const REASONS = ["abgeschnitten", "zu weit weg", "zu nah", "verschwommen"]; // muss zu pi/photobooth.py passen
 let checked = new Set(); // als "angekommen" markierte Aufgaben
+let reasons = {}; // Aufgabe -> Begründung, warum sie fehlt (optional)
 let lastReviewKey = null;
 
 // Kommt eine Rückmeldung (auch von einem anderen Gerät der Spielleitung), die Checkliste daran angleichen
@@ -339,6 +393,10 @@ function syncReview() {
   if (!status.review || !status.tasks) return;
   const missing = new Set(status.review.missing);
   checked = new Set(Array.from({ length: status.tasks }, (_, i) => i + 1).filter((n) => !missing.has(n)));
+  reasons = {};
+  for (const [n, why] of Object.entries(status.review.reasons || {})) {
+    if (REASONS.includes(why)) reasons[n] = why;
+  }
 }
 
 function missingTasks() {
@@ -354,16 +412,50 @@ function renderTaskList() {
     b.textContent = n;
     b.setAttribute("aria-pressed", checked.has(n));
     b.onclick = () => {
-      checked.has(n) ? checked.delete(n) : checked.add(n);
+      if (checked.has(n)) {
+        checked.delete(n);
+      } else {
+        checked.add(n);
+        delete reasons[n]; // angekommen -> keine Begründung mehr
+      }
       renderTaskList();
     };
     list.append(b);
   }
   const missing = missingTasks();
+  renderReasons(missing);
   $("send-review").textContent = missing.length
     ? `Senden – fehlt: ${missing.join(", ")}`
     : "✓ Alle angekommen – senden";
   $("all-tasks").textContent = missing.length ? "Alle markieren" : "Keine markieren";
+}
+
+// Je fehlender Aufgabe optional eine Begründung (nochmal antippen = abwählen)
+function renderReasons(missing) {
+  const box = $("reason-list");
+  box.replaceChildren();
+  box.hidden = !missing.length || missing.length === status.tasks;
+  if (box.hidden) return;
+  box.append(Object.assign(document.createElement("p"), {
+    className: "hint",
+    textContent: "Warum fehlt die Aufgabe? (optional)",
+  }));
+  for (const n of missing) {
+    const row = document.createElement("div");
+    row.className = "reason-row";
+    row.append(Object.assign(document.createElement("span"), { className: "reason-task", textContent: `Aufgabe ${n}` }));
+    for (const why of REASONS) {
+      const b = document.createElement("button");
+      b.className = `reason${reasons[n] === why ? " on" : ""}`;
+      b.textContent = why;
+      b.onclick = () => {
+        reasons[n] === why ? delete reasons[n] : (reasons[n] = why);
+        renderReasons(missingTasks());
+      };
+      row.append(b);
+    }
+    box.append(row);
+  }
 }
 
 $("all-tasks").onclick = () => {
@@ -376,8 +468,10 @@ $("all-tasks").onclick = () => {
 $("send-review").onclick = async () => {
   const button = $("send-review");
   button.disabled = true;
+  const missing = missingTasks();
+  const why = Object.fromEntries(missing.filter((n) => reasons[n]).map((n) => [String(n), reasons[n]]));
   try {
-    await publishBack({ type: "review", session: status.session, missing: missingTasks() });
+    await publishBack({ type: "review", session: status.session, missing, reasons: why });
     $("review-status").textContent = "Gesendet ✓ – die Fotobox zeigt die Rückmeldung an.";
   } catch (err) {
     $("review-status").textContent = `Senden fehlgeschlagen: ${err.message}`;
@@ -596,11 +690,10 @@ $("clear-form").onsubmit = async (e) => {
 // --- Bilder an die Fotobox schicken: ganz normaler Upload, ohne Zuschneiden ---
 // Bilder bleiben im Originalformat. Nur die Dateigröße wird angepasst (längste Seite max. 1600 px, JPEG),
 // weil ntfy.sh ohne Konto höchstens 2 MB pro Bild annimmt.
-let prepared = []; // { source, rotation, caption, help, blob, url }
+let prepared = []; // { caption, help, blob, url }
 let uploading = false;
 
-// Datei laden und auf Upload-Größe bringen (längste Seite max. imageMaxSide). Bleibt als Vorlage erhalten,
-// damit mehrfaches Drehen nicht jedes Mal neu komprimiert (sonst würde das Bild immer schlechter).
+// Datei laden und auf Upload-Größe bringen (längste Seite max. imageMaxSide) – ohne Zuschneiden.
 async function loadSource(file) {
   const url = URL.createObjectURL(file);
   try {
@@ -622,35 +715,16 @@ async function loadSource(file) {
   }
 }
 
-// Upload-Datei aus der Vorlage erzeugen, gedreht um item.rotation × 90° im Uhrzeigersinn.
-// Dauert bei großen Bildern ~1 s: item.ready sagt, wann die aktuelle Fassung fertig ist, und bei schnellem
-// Mehrfach-Drehen gewinnt immer die neueste Drehung (ältere Ergebnisse werden verworfen).
-function encodeItem(item) {
-  const token = (item.token = (item.token || 0) + 1);
-  item.ready = encodeRotated(item.source, item.rotation).then((blob) => {
-    if (token !== item.token) return; // inzwischen weitergedreht
-    if (item.url) URL.revokeObjectURL(item.url);
-    item.blob = blob;
-    item.url = URL.createObjectURL(blob);
-  });
-  return item.ready;
-}
-
-async function encodeRotated(source, rotation) {
-  const canvas = document.createElement("canvas");
-  const sideways = rotation % 2 === 1;
-  canvas.width = sideways ? source.height : source.width;
-  canvas.height = sideways ? source.width : source.height;
-  const ctx = canvas.getContext("2d");
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate((rotation * Math.PI) / 2);
-  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+// Upload-Datei (JPEG, höchstens maxUploadBytes) aus dem vorbereiteten Bild erzeugen
+async function encodeItem(item) {
   let blob = null;
   for (const quality of [0.9, 0.8, 0.65, 0.5]) {
-    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    blob = await new Promise((resolve) => item.source.toBlob(resolve, "image/jpeg", quality));
     if (blob.size <= CONFIG.maxUploadBytes) break;
   }
-  return blob;
+  item.blob = blob;
+  item.url = URL.createObjectURL(blob);
+  delete item.source; // wird nicht mehr gebraucht
 }
 
 // Bilder nacheinander vorbereiten – egal ob ausgewählt oder per Strg+V eingefügt
@@ -663,7 +737,7 @@ async function addFiles(files, context = null) {
       $("upload-status").textContent = `„${file.name}“ kann dieser Browser nicht öffnen.`;
       continue;
     }
-    const item = { source, rotation: 0, caption: context ? context.caption : "", help: !!context, blob: null, url: null };
+    const item = { source, caption: context ? context.caption : "", help: !!context, blob: null, url: null };
     await encodeItem(item);
     prepared.push(item);
     renderPrepared();
@@ -718,19 +792,7 @@ function renderPrepared() {
       prepared = prepared.filter((p) => p !== item);
       renderPrepared();
     };
-    const rotate = document.createElement("button");
-    rotate.className = "remove";
-    rotate.textContent = "↻";
-    rotate.title = "90° drehen";
-    rotate.onclick = async () => {
-      if (uploading) return;
-      item.rotation = (item.rotation + 1) % 4;
-      img.classList.add("busy");
-      const ready = encodeItem(item);
-      await ready;
-      if (item.ready === ready) renderPrepared(); // nur die neueste Drehung anzeigen
-    };
-    fields.append(caption, rotate, remove);
+    fields.append(caption, remove);
     const help = document.createElement("label");
     help.className = "check item-help";
     const box2 = Object.assign(document.createElement("input"), { type: "checkbox", checked: item.help });
@@ -764,7 +826,6 @@ $("upload-images").onclick = async () => {
     while (prepared.length) {
       const item = prepared[0];
       $("upload-status").textContent = `Sende Bild ${sent + 1} von ${total} …`;
-      await item.ready; // falls gerade noch gedreht wird: erst die fertige Fassung schicken
       const meta = {
         type: "image",
         session: status.session,
@@ -815,7 +876,19 @@ function showLightbox() {
   if (!paths.length) return;
   lbIndex = (lbIndex + paths.length) % paths.length;
   $("lb-img").src = photoUrl(paths[lbIndex]);
+  applyRotation($("lb-img"), paths[lbIndex]);
 }
+
+// ↻ in der Großansicht: nur dieses Foto um 90° im Uhrzeigersinn drehen
+$("lb-rotate").onclick = (e) => {
+  e.stopPropagation();
+  const path = lbPaths()[lbIndex];
+  rotation.photos[path] = ((Number(rotation.photos[path]) || 0) + 1) % 4;
+  saveRotation();
+  applyRotation($("lb-img"), path);
+  const box = [...$("gallery").children].find((b) => b.dataset.path === path);
+  if (box) applyRotation(box, path);
+};
 
 $("lb-close").onclick = () => ($("lightbox").hidden = true);
 $("lb-prev").onclick = () => { lbIndex--; showLightbox(); };
@@ -828,6 +901,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $("lightbox").hidden = true;
   if (e.key === "ArrowLeft") { lbIndex--; showLightbox(); }
   if (e.key === "ArrowRight") { lbIndex++; showLightbox(); }
+  if (e.key === "r" || e.key === "R") $("lb-rotate").click();
 });
 
 // ---------------------------------------------------------------- Start

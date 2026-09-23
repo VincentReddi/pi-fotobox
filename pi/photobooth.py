@@ -335,7 +335,8 @@ def back_topic(cfg):
     return f"{cfg['ntfy_topic']}-r-{digest[:24]}"
 
 
-REPLIES = ("OK", "Egal", "Neustart")  # Antworten des Pi auf eine Nachricht der Spielleitung
+REPLIES = ("OK", "Egal", "Neustart")
+REVIEW_REASONS = ("abgeschnitten", "zu weit weg", "zu nah", "verschwommen")  # muss zu docs/app.js passen  # Antworten des Pi auf eine Nachricht der Spielleitung
 
 
 class Backchannel(threading.Thread):
@@ -398,6 +399,12 @@ class Backchannel(threading.Thread):
     def presence(self, active):
         """Pi aktiv / inaktiv – die Webseite zeigt es der Spielleitung an."""
         return self.publish({"type": "presence", "who": "pi", "active": bool(active), "at": int(time.time() * 1000)})
+
+    def reset_presence(self):
+        """Neue Runde: Pi und Spielleitung wieder auf inaktiv – beide melden sich neu bereit."""
+        at = int(time.time() * 1000)
+        ok = self.publish({"type": "presence", "who": "pi", "active": False, "at": at})
+        return self.publish({"type": "presence", "who": "leitung", "active": False, "at": at}) and ok
 
     def restore_state(self):
         """Nach einem (Neu-)Start: letzte Nachricht und Aktiv-Status der Spielleitung wiederherstellen
@@ -467,7 +474,10 @@ class Backchannel(threading.Thread):
             return
         if data.get("type") == "review":
             missing = sorted({int(x) for x in data.get("missing", []) if isinstance(x, int) and 0 < x < 1000})
-            self.on_event("review", {"missing": missing})
+            # optionale Begründung je fehlender Aufgabe, z. B. {"3": "verschwommen"}
+            raw = data.get("reasons") if isinstance(data.get("reasons"), dict) else {}
+            reasons = {str(n): raw[str(n)] for n in missing if raw.get(str(n)) in REVIEW_REASONS}
+            self.on_event("review", {"missing": missing, "reasons": reasons})
         elif data.get("type") == "image" and msg.get("attachment"):
             caption = " ".join(str(data.get("caption", "")).split())[:80]
             upload = str(data.get("upload", ""))[:40]
@@ -566,8 +576,8 @@ def show_limits(gh, cfg):
         print(f"GitHub: nicht abrufbar ({e})")
 
 
-def setup(cfg):
-    """Verbindet mit GitHub, startet den Upload-Thread und die Kamera."""
+def connect(cfg):
+    """Verbindet mit GitHub und startet den Upload-Thread (erst wenn die Verbindung steht)."""
     gh = GitHub(cfg["token"], cfg["owner"], cfg["repo"], cfg["branch"])
     try:
         gh.ensure_branch()
@@ -575,7 +585,12 @@ def setup(cfg):
     except requests.RequestException as e:
         raise SystemExit(f"Verbindung zu GitHub fehlgeschlagen:\n  {e}")
     up.start()
-    return up, open_camera(cfg)
+    return up
+
+
+def setup(cfg):
+    """Verbindet mit GitHub, startet den Upload-Thread und die Kamera."""
+    return connect(cfg), open_camera(cfg)
 
 
 def main():

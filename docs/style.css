@@ -212,7 +212,6 @@ textarea {
 .prepared:empty { display: none; }
 .item { background: var(--panel-2); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
 .item img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; display: block; }
-.item img.busy { opacity: .4; transition: opacity .2s; } /* wird gerade gedreht */
 .item .fields { display: flex; gap: 6px; padding: 8px; }
 .item .fields input { flex: 1; min-width: 0; }
 .item .remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
@@ -234,18 +233,49 @@ input[type="text"], input[type="password"] {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
 }
-.gallery img {
-  width: 100%;
+.gallery .photo {
+  position: relative;
   aspect-ratio: 16 / 9;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: 8px;
+  background: #000;
   cursor: zoom-in;
-  background: var(--panel);
+}
+.gallery .photo img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translate(-50%, -50%);
   opacity: 0;
   transition: opacity .5s;
 }
-.gallery img.loaded { opacity: 1; }
-.gallery img.resent { outline: 3px solid var(--green); outline-offset: 2px; }
+.gallery .photo img.loaded { opacity: 1; }
+/* gedreht: bei 90°/270° Breite und Höhe tauschen, ganzes Foto zeigen */
+.gallery .photo.r1 img, .gallery .photo.r3 img { width: 56.25%; height: 177.78%; object-fit: contain; }
+.gallery .photo.r1 img { transform: translate(-50%, -50%) rotate(90deg); }
+.gallery .photo.r2 img { transform: translate(-50%, -50%) rotate(180deg); }
+.gallery .photo.r3 img { transform: translate(-50%, -50%) rotate(270deg); }
+.gallery .photo.resent { outline: 3px solid var(--green); outline-offset: 2px; }
+
+.gallery-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 28px 4px 12px; }
+.gallery-head .session-title { margin: 0; }
+.btn.small { padding: 8px 12px; font-size: .9rem; }
+
+.reason-list { display: flex; flex-direction: column; gap: 8px; }
+.reason-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.reason-task { font-weight: 700; min-width: 90px; }
+.reason {
+  border: 1px solid #3a3f48;
+  background: none;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.reason.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .lightbox {
   position: fixed;
@@ -258,6 +288,10 @@ input[type="text"], input[type="password"] {
 }
 .lightbox[hidden] { display: none; }
 .lightbox img { max-width: 92vw; max-height: 90vh; border-radius: 6px; }
+.lightbox img.r1 { transform: rotate(90deg); max-width: 90vh; max-height: 92vw; }
+.lightbox img.r2 { transform: rotate(180deg); }
+.lightbox img.r3 { transform: rotate(270deg); max-width: 90vh; max-height: 92vw; }
+.lb-rotate { bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 2rem !important; }
 .lightbox button {
   position: absolute;
   background: none;

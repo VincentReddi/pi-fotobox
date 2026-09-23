@@ -55,11 +55,19 @@ DISPLAY=:0 python3 -s gui.py   # per SSH auf dem Pi-Display starten
 
 Beenden: **Esc** oder das ⏻ oben rechts **3 Sekunden gedrückt halten**.
 
-Automatisch starten, sobald der Desktop da ist:
+Automatisch starten, sobald der Desktop da ist (einmalig einrichten):
 
 ```bash
-cp fotobox-gui.desktop ~/.config/autostart/
+cd ~/pi-fotobox/pi
+sed -i 's/\r$//' start-fotobox.sh && chmod +x start-fotobox.sh
+mkdir -p ~/.config/autostart && cp fotobox-gui.desktop ~/.config/autostart/
 ```
+
+`start-fotobox.sh` wartet kurz auf Desktop, Display-Drehung und Touch, schaltet den Bildschirmschoner ab und **startet die Oberfläche nach einem Absturz nach 5 s neu**. Beendest du sie absichtlich (⏻ 3 s halten oder Esc), bleibt sie aus. Ist beim Hochfahren noch kein WLAN da, versucht die Oberfläche es alle 15 s von selbst erneut.
+
+- Nach einem Update: `pkill -f gui.py`. Die Oberfläche startet nach 5 s mit dem neuen Code.
+- Ganz anhalten: `pkill -f start-fotobox.sh; pkill -f gui.py`
+- Log ansehen: `tail -f ~/pi-fotobox/pi/gui.log`
 
 Fehler landen in `pi/gui.log`. Wichtig: Es darf immer nur **ein** Fotobox-Programm laufen (GUI **oder** `photobooth.py` / Dienst), denn die Kamera kann nur von einem Programm gleichzeitig benutzt werden.
 
@@ -68,15 +76,15 @@ Bei jedem Start wird der Branch `photos` zurückgesetzt, **alle alten Fotos vers
 ### Aufgaben, Rückmeldung und Bilder zurück (Spielleitung)
 
 1. Am Pi mit **− / +** die Anzahl der Aufgaben wählen → **Starten** → 20 Fotos.
-2. Die **Spielleitung** meldet sich auf der Webseite mit dem Passwort an (`web_password` in `config.json`), hakt die Aufgaben ab, die auf den Fotos zu sehen sind, und sendet die Rückmeldung. Ohne Passwort zeigt die Webseite nur die Anmeldung. Die Fotos liegen aber trotzdem im öffentlichen GitHub-Repo.
+2. Die **Spielleitung** meldet sich auf der Webseite mit dem Passwort an (`web_password` in `config.json`), hakt die Aufgaben ab, die auf den Fotos zu sehen sind, und sendet die Rückmeldung. Für jede fehlende Aufgabe kann sie optional eine Begründung wählen: **abgeschnitten**, **zu weit weg**, **zu nah** oder **verschwommen**. Der Pi zeigt sie an, z. B. „Aufgabe 3 – verschwommen“. Sind die Fotos der Fotobox gekippt (z. B. Kamera quer eingebaut), dreht **↻ Alle Fotos drehen** über der Galerie alle um 90°. **↻** in der Großansicht (Taste R) dreht ein einzelnes Foto. Das ändert nur die Anzeige, der Browser merkt sich die Drehung. Ohne Passwort zeigt die Webseite nur die Anmeldung. Die Fotos liegen aber trotzdem im öffentlichen GitHub-Repo.
 3. Der Pi zeigt „Alle Aufgaben angekommen“ oder „Es fehlen: Aufgaben 3, 7“. Mit **10 Fotos nachschicken** kommen weitere Fotos dazu, die auf der Webseite grün umrandet sind. **Weiter** geht jederzeit.
-4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus oder fügt ein kopiertes Bild mit **Strg + V** ein, gibt ihnen in der Liste einen Namen und schickt sie ab. Es wird **nichts zugeschnitten**: Bilder und Screenshots gehen im Originalformat raus. Nur die Dateigröße wird angepasst (längste Seite max. 1600 px, JPEG). Mit **↻** dreht die Spielleitung ein Bild bei jedem Klick um 90° im Uhrzeigersinn.
+4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus oder fügt ein kopiertes Bild mit **Strg + V** ein, gibt ihnen in der Liste einen Namen und schickt sie ab. Es wird **nichts zugeschnitten**: Bilder und Screenshots gehen im Originalformat raus. Nur die Dateigröße wird angepasst (längste Seite max. 1600 px, JPEG).
 5. Am Pi erscheinen die Bilder mit ihrem Namen. Tippen links oder rechts bzw. Wischen blättert. Der kleine **☰**-Knopf unten links öffnet das Menü mit **Neue Runde**, der Name bleibt dabei sichtbar.
 6. Die Spielleitung kann **jederzeit** eine Nachricht an die Fotobox schicken, auch ohne laufende Runde. Die Nachricht erscheint auf jedem Bildschirm als Fenster. Jeder Aufnahme-Start (**Starten** und **Fotos nachschicken**) entfernt sie, am Pi und auf der Webseite. Ein neuer Text ersetzt den alten. Am Pi antwortest du beliebig oft mit **OK**, **Egal** oder **Neustart**, und die Webseite zeigt jede Antwort mit Uhrzeit. Im Bildbetrachter öffnet **✉** unten rechts die Nachricht. Der Knopf ist rot, solange sie unbeantwortet ist. „Neustart“ ist nur eine Antwort an die Spielleitung und startet keine neue Runde. Wichtige Knöpfe (**Neustart** und **Neue Runde**) müssen **1,5 Sekunden gedrückt gehalten** werden. Ein Balken im Knopf zeigt den Fortschritt, und wer zu früh loslässt, löst nichts aus.
 
 7. **Problem melden (Notfall):** Im Bildbetrachter führt ☰ → **Problem melden** zu einem eigenen Bildschirm. Dort wählst du **Aufgabe fehlt** oder **Nicht lösbar**, dann mit − / + die Aufgabennummer und optional einen Buchstaben (z. B. 3B), und tippst auf **Senden**. Auf der Webseite erscheint die Meldung rot umrandet unter „Meldungen der Fotobox“. Mit **Hilfe-Bild schicken** schickt die Spielleitung ein Bild, das auf der Fotobox **rot umrandet** mit „Hilfe“-Schild erscheint, auch später unter „Bilder“. In der Bilderliste lässt sich jedes Bild per Häkchen als Hilfe-Bild markieren.
 
-**Aktiv/Inaktiv:** Auf der Webseite schaltet die Spielleitung oben **Spielleitung aktiv** um und sieht daneben, ob die **Fotobox aktiv** ist. Am Pi schaltest du auf dem Startbildschirm **Pi aktiv** um und siehst daneben den Status der Spielleitung. Er steht auch auf den Bildschirmen „Rückmeldung“ und „Warte auf Bilder“. Beide Seiten schalten von Hand um. Nach einem Neustart meldet sich der Pi als inaktiv und holt sich die letzte Nachricht und den Status der Spielleitung wieder.
+**Aktiv/Inaktiv:** Auf der Webseite schaltet die Spielleitung oben **Spielleitung aktiv** um und sieht daneben, ob die **Fotobox aktiv** ist. Am Pi schaltest du auf dem Startbildschirm **Pi aktiv** um und siehst daneben den Status der Spielleitung. Er steht auch auf den Bildschirmen „Rückmeldung“ und „Warte auf Bilder“. Beide Seiten schalten von Hand um. **Neue Runde** am Pi setzt beide wieder auf inaktiv, damit sich vor dem nächsten Start beide neu als bereit melden. Nach einem Neustart meldet sich der Pi als inaktiv und holt sich die letzte Nachricht und den Status der Spielleitung wieder.
 
 **Gespeicherte Bilder:** Alle Bilder der Spielleitung werden mit ihrem Namen dauerhaft gespeichert (`pi/fotos/<runde>/empfangen/`, Name in der `.json`-Datei daneben). Auf dem Startbildschirm öffnet **Bilder** oben links alle gespeicherten Bilder direkt im normalen Betrachter, beginnend beim neuesten. Das funktioniert auch nach einem Neustart des Pi. Die Spielleitung kann sie auf der Webseite über **Alle gespeicherten Bilder löschen** entfernen. Dafür braucht sie das Lösch-Passwort (`clear_password`). Es steht nur in der `config.json` auf dem Pi, wird dort geprüft und geht nie im Klartext über ntfy.sh. Die eigenen Fotos des Pi bleiben dabei erhalten.
 
