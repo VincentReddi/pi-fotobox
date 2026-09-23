@@ -5,8 +5,17 @@
   "branch": "photos",
   "button_pin": 17,
   "countdown": 15,
-  "count": 30,
+  "count": 20,
   "interval": 1.0,
-  "resolution": [1920, 1080],
-  "jpeg_quality": 85
+  "resolution": [
+    1920,
+    1080
+  ],
+  "jpeg_quality": 85,
+  "ntfy_token": "",
+  "publish_every": 8,
+  "tasks": 5,
+  "resend_count": 10,
+  "resend_countdown": 15,
+  "web_password": ""
 }

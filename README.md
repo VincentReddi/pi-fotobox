@@ -1,6 +1,6 @@
 # Pi Fotobox
 
-Knopf am Raspberry Pi drücken → 15 s Countdown → 30 Fotos → jedes Foto erscheint sofort auf der GitHub-Pages-Seite.
+Knopf am Raspberry Pi drücken → 15 s Countdown → 20 Fotos → jedes Foto erscheint sofort auf der GitHub-Pages-Seite.
 
 ```
 [Knopf] → photobooth.py ──(GitHub API)──► Branch "photos": sessions/<zeit>/001.jpg … (+ status.json am Ende)
@@ -10,7 +10,7 @@ Knopf am Raspberry Pi drücken → 15 s Countdown → 30 Fotos → jedes Foto er
 
 Die Fotos landen im separaten Branch `photos`. Dadurch löst nicht jedes Foto einen neuen Pages-Build aus und die Bilder sind sofort sichtbar.
 
-Live-Meldungen laufen über [ntfy.sh](https://ntfy.sh), einen kostenlosen Push-Dienst ohne Anmeldung. Direkt über die GitHub-API wäre das nicht möglich: Ohne Login erlaubt sie nur 60 Anfragen pro Stunde und IP. Das Thema (`ntfy_topic` in `pi/photobooth.py` bzw. `ntfyTopic` in `docs/app.js`) muss auf beiden Seiten gleich sein. ntfy.sh erlaubt 250 Nachrichten pro Tag, der Pi sendet pro Session ungefähr 10.
+Live-Meldungen laufen über [ntfy.sh](https://ntfy.sh), einen kostenlosen Push-Dienst ohne Anmeldung. Direkt über die GitHub-API wäre das nicht möglich: Ohne Login erlaubt sie nur 60 Anfragen pro Stunde und IP. Das Thema (`ntfy_topic` in `pi/photobooth.py` bzw. `ntfyTopic` in `docs/app.js`) muss auf beiden Seiten gleich sein. ntfy.sh erlaubt 250 Nachrichten pro Tag, der Pi sendet höchstens alle 8 s eine Meldung, also etwa 6 pro Session (≈ 40 Sessions pro Tag).
 
 > ⚠️ GitHub Pages (kostenlos) braucht ein **öffentliches** Repo, die Fotos sind also öffentlich einsehbar.
 
@@ -41,7 +41,39 @@ python3 photobooth.py
 
 Ohne Taster testen: `python3 -s photobooth.py --keyboard` (Start mit Enter).
 
+Limit-Verbrauch anzeigen: `python3 -s photobooth.py --limits`. Das zeigt die ntfy.sh-Meldungen von heute, die GitHub-API-Nutzung und die Repo-Größe.
+
 `-s` sorgt dafür, dass Python per pip in `~/.local` installierte Pakete ignoriert. Ein pip-numpy 2.x dort bricht sonst picamera2 (`numpy.dtype size changed …`).
+
+### Touch-Oberfläche (empfohlen)
+
+`pi/gui.py` zeigt auf dem Pi-Display einen großen **Starten**-Knopf, danach Countdown, Fotozähler (mit Blitz-Effekt) und Upload-Fortschritt. Ein angeschlossener Taster funktioniert zusätzlich.
+
+```bash
+DISPLAY=:0 python3 -s gui.py   # per SSH auf dem Pi-Display starten
+```
+
+Beenden: **Esc** oder das ⏻ oben rechts **3 Sekunden gedrückt halten**.
+
+Automatisch starten, sobald der Desktop da ist:
+
+```bash
+cp fotobox-gui.desktop ~/.config/autostart/
+```
+
+Fehler landen in `pi/gui.log`. Wichtig: Es darf immer nur **ein** Fotobox-Programm laufen (GUI **oder** `photobooth.py` / Dienst), denn die Kamera kann nur von einem Programm gleichzeitig benutzt werden.
+
+Bei jedem Start wird der Branch `photos` zurückgesetzt, **alle alten Fotos verschwinden von der Webseite** (lokale Kopien in `pi/fotos/` bleiben). Abschalten mit `"clear_old": false` in `config.json`.
+
+### Aufgaben, Rückmeldung und Bilder zurück (Spielleitung)
+
+1. Am Pi mit **− / +** die Anzahl der Aufgaben wählen → **Starten** → 20 Fotos.
+2. Die **Spielleitung** meldet sich auf der Webseite über „Spielleitung“ mit dem Passwort an (`web_password` in `config.json`), hakt die Aufgaben ab, die auf den Fotos zu sehen sind, und sendet die Rückmeldung.
+3. Der Pi zeigt „Alle Aufgaben angekommen“ oder „Es fehlen: Aufgaben 3, 7“. Mit **10 Fotos nachschicken** kommen weitere Fotos dazu, die auf der Webseite grün umrandet sind. **Weiter** geht jederzeit.
+4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus, schneidet sie auf **16:9** zu, gibt ihnen einen Namen und schickt sie ab.
+5. Am Pi erscheinen die Bilder mit ihrem Namen. Links oder rechts tippen bzw. wischen blättert, Tippen in die Mitte blendet **Neue Runde** ein.
+
+Technik: Rückmeldungen und Bilder laufen über einen zweiten ntfy-Kanal, dessen Name aus dem Passwort berechnet wird (SHA-256). Das Passwort selbst steht nirgends auf der Webseite. Bilder dürfen ohne ntfy-Konto maximal 2 MB groß sein (1280×720-JPEG, reicht locker) und verfallen bei ntfy.sh nach 3 Stunden. Der Pi speichert sie sofort unter `pi/fotos/<session>/empfangen/`. Für die Bildanzeige braucht der Pi `sudo apt install -y python3-pil.imagetk`.
 
 ### Autostart beim Booten
 
@@ -58,12 +90,19 @@ journalctl -u photobooth -f   # Log ansehen
 | Schlüssel      | Standard       | Bedeutung                        |
 |----------------|----------------|----------------------------------|
 | `countdown`    | 15             | Sekunden bis zum ersten Foto     |
-| `count`        | 30             | Anzahl Fotos pro Durchgang       |
+| `count`        | 20             | Anzahl Fotos pro Durchgang       |
 | `interval`     | 1.0            | Sekunden zwischen den Fotos      |
 | `resolution`   | [1920, 1080]   | Bildgröße                        |
 | `jpeg_quality` | 85             | JPEG-Qualität (1–100)            |
 | `button_pin`   | 17             | GPIO-Nummer des Tasters          |
+| `ntfy_token`   | leer           | Zugangstoken eines ntfy.sh-Kontos (höheres Nachrichtenlimit) |
+| `publish_every`| 8              | Sekunden zwischen Live-Meldungen, `0` = nach jedem Foto |
+| `clear_old`    | true           | Bei jedem Start alle alten Fotos auf GitHub löschen |
+| `tasks`        | 5              | Vorgeschlagene Anzahl Aufgaben (am Pi mit −/+ änderbar) |
+| `resend_count` | 10             | Fotos beim Nachschicken |
+| `resend_countdown` | 15         | Countdown beim Nachschicken (Sekunden) |
+| `web_password` | leer           | Passwort der Spielleitung auf der Webseite (ohne: kein Rückkanal) |
 
 Lokale Kopien der Fotos liegen zusätzlich in `pi/fotos/<session>/`.
 
-Hinweis: Jeder Durchgang belegt ca. 10–15 MB im Repo. GitHub empfiehlt, dass Repos unter 1 GB bleiben, also alte Sessions ab und zu löschen (z. B. den Branch `photos` löschen; er wird automatisch neu angelegt).
+Hinweis: Jeder Durchgang belegt ca. 6–10 MB im Repo. GitHub empfiehlt, dass Repos unter 1 GB bleiben, also alte Sessions ab und zu löschen (z. B. den Branch `photos` löschen; er wird automatisch neu angelegt).

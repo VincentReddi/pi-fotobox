@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Pi Fotobox
+Exec=sh -c "sleep 6; cd /home/scoop1337/pi-fotobox/pi && python3 -s gui.py >> gui.log 2>&1"

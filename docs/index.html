@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Fotobox</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <header>
     <h1>Pi Fotobox</h1>
     <span id="live" class="live" hidden>● live</span>
+    <button id="login-btn" class="link">Spielleitung</button>
   </header>
 
   <main>
@@ -17,9 +18,33 @@
       <div id="countdown" class="countdown" hidden></div>
       <p id="message" class="message">Verbinde …</p>
       <div id="progress" class="progress" hidden><div id="bar"></div></div>
+      <p id="tasks-info" class="tasks-info" hidden></p>
     </section>
 
-    <h2 id="session-title" hidden></h2>
+    <section id="review-panel" class="panel" hidden>
+      <h2>Aufgaben prüfen</h2>
+      <p class="hint">Tippe alle Aufgaben an, die auf den Fotos zu sehen sind. Nicht markierte gelten als fehlend.</p>
+      <div id="task-list" class="task-list"></div>
+      <div class="row">
+        <button id="all-tasks" class="btn secondary">Alle markieren</button>
+        <button id="send-review" class="btn primary"></button>
+      </div>
+      <p id="review-status" class="hint"></p>
+    </section>
+
+    <section id="images-panel" class="panel" hidden>
+      <h2>Bilder an die Fotobox schicken</h2>
+      <p class="hint">Jedes Bild wird auf 16:9 zugeschnitten und auf dem Display der Fotobox mit seinem Namen gezeigt.</p>
+      <label class="btn secondary file-btn">
+        Bilder auswählen
+        <input type="file" id="file-input" accept="image/*" multiple hidden>
+      </label>
+      <div id="prepared" class="prepared"></div>
+      <button id="upload-images" class="btn primary" hidden></button>
+      <p id="upload-status" class="hint"></p>
+    </section>
+
+    <h2 id="session-title" class="session-title" hidden></h2>
     <section id="gallery" class="gallery"></section>
   </main>
 
@@ -30,6 +55,31 @@
     <button id="lb-close" class="lb-close" aria-label="Schließen">✕</button>
   </div>
 
-  <script src="app.js"></script>
+  <dialog id="login-dialog">
+    <form id="login-form" method="dialog">
+      <h2>Spielleitung</h2>
+      <p class="hint">Mit dem Passwort kannst du Aufgaben bestätigen und Bilder an die Fotobox schicken.</p>
+      <input type="password" id="login-password" placeholder="Passwort" autocomplete="current-password" required>
+      <p id="login-error" class="error" hidden></p>
+      <div class="row">
+        <button type="button" id="login-cancel" class="btn secondary">Abbrechen</button>
+        <button type="submit" id="login-submit" class="btn primary">Anmelden</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="crop-dialog">
+    <h2>Bild zuschneiden</h2>
+    <p class="hint">Ziehen zum Verschieben, Regler oder Mausrad zum Zoomen.</p>
+    <canvas id="crop-canvas"></canvas>
+    <label class="zoom">Zoom <input type="range" id="crop-zoom" min="1" max="4" step="0.01" value="1"></label>
+    <input type="text" id="crop-caption" maxlength="80" placeholder="Name des Bildes (wird auf der Fotobox angezeigt)">
+    <div class="row">
+      <button type="button" id="crop-cancel" class="btn secondary">Abbrechen</button>
+      <button type="button" id="crop-ok" class="btn primary">Übernehmen</button>
+    </div>
+  </dialog>
+
+  <script src="app.js?v=3"></script>
 </body>
 </html>
