@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Fotobox</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <header>
@@ -67,7 +67,7 @@
 
     <section id="images-panel" class="panel" hidden>
       <h2>Bilder an die Fotobox schicken</h2>
-      <p class="hint">Jedes Bild wird auf 16:9 zugeschnitten und auf dem Display der Fotobox mit seinem Namen gezeigt.</p>
+      <p class="hint">Bilder und Screenshots gehen so, wie sie sind, an die Fotobox, ohne Zuschneiden, und erscheinen dort mit ihrem Namen.</p>
       <div class="row add-row">
         <label class="btn secondary file-btn">
           Bilder auswählen
@@ -99,19 +99,6 @@
     <button id="lb-close" class="lb-close" aria-label="Schließen">✕</button>
   </div>
 
-  <dialog id="crop-dialog">
-    <h2>Bild zuschneiden</h2>
-    <p class="hint">Ziehen zum Verschieben, Regler oder Mausrad zum Zoomen.</p>
-    <canvas id="crop-canvas"></canvas>
-    <label class="zoom">Zoom <input type="range" id="crop-zoom" min="1" max="4" step="0.01" value="1"></label>
-    <input type="text" id="crop-caption" maxlength="80" placeholder="Name des Bildes (wird auf der Fotobox angezeigt)">
-    <label class="check"><input type="checkbox" id="crop-help"> Hilfe-Bild – auf der Fotobox rot umrandet</label>
-    <div class="row">
-      <button type="button" id="crop-cancel" class="btn secondary">Abbrechen</button>
-      <button type="button" id="crop-ok" class="btn primary">Übernehmen</button>
-    </div>
-  </dialog>
-
   <dialog id="clear-dialog">
     <form id="clear-form">
       <h2>Alle gespeicherten Bilder löschen?</h2>
@@ -125,6 +112,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

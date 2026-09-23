@@ -6,8 +6,7 @@ const CONFIG = {
   branch: "photos",
   ntfyTopic: "pi-fotobox-f5849b5b30bccc45", // muss zu "ntfy_topic" in pi/photobooth.py passen
   ntfy: "https://ntfy.sh",
-  imageWidth: 1280, // Bilder an die Fotobox: immer 16:9
-  imageHeight: 720,
+  imageMaxSide: 1600, // Bilder an die Fotobox bleiben im Originalformat, längste Seite höchstens so groß
   maxUploadBytes: 1_900_000, // ntfy.sh erlaubt ohne Konto 2 MB pro Anhang
 };
 
@@ -565,173 +564,54 @@ $("clear-form").onsubmit = async (e) => {
   }
 };
 
-// --- Bilder vorbereiten (16:9 zuschneiden + benennen) und an die Fotobox schicken ---
-let prepared = []; // { source, zoom, cx, cy, caption, blob, url }
+// --- Bilder an die Fotobox schicken: ganz normaler Upload, ohne Zuschneiden ---
+// Bilder bleiben im Originalformat. Nur die Dateigröße wird angepasst (längste Seite max. 1600 px, JPEG),
+// weil ntfy.sh ohne Konto höchstens 2 MB pro Bild annimmt.
+let prepared = []; // { caption, help, blob, url }
 let uploading = false;
 
-async function loadSource(file) {
+async function prepareImage(file) {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
     img.src = url;
     await img.decode(); // berücksichtigt die EXIF-Drehung von Handyfotos
-    const scale = Math.min(1, 2560 / Math.max(img.naturalWidth, img.naturalHeight));
+    const scale = Math.min(1, CONFIG.imageMaxSide / Math.max(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
-    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; // durchsichtige Bereiche (PNG) werden weiß statt schwarz
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    let blob = null;
+    for (const quality of [0.9, 0.8, 0.65, 0.5]) {
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      if (blob.size <= CONFIG.maxUploadBytes) break;
+    }
+    return blob;
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-// Ausschnitt: Mittelpunkt (cx, cy) im Originalbild + Zoom (1 = Bild füllt den 16:9-Rahmen gerade so)
-function geometry(item, fw, fh) {
-  const sw = item.source.width;
-  const sh = item.source.height;
-  const s = Math.max(fw / sw, fh / sh) * item.zoom;
-  const halfW = fw / (2 * s);
-  const halfH = fh / (2 * s);
-  item.cx = Math.min(Math.max(item.cx, halfW), sw - halfW);
-  item.cy = Math.min(Math.max(item.cy, halfH), sh - halfH);
-  return { s, x: fw / 2 - item.cx * s, y: fh / 2 - item.cy * s, w: sw * s, h: sh * s };
-}
-
-function drawInto(canvas, item) {
-  const ctx = canvas.getContext("2d");
-  const g = geometry(item, canvas.width, canvas.height);
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(item.source, g.x, g.y, g.w, g.h);
-}
-
-async function renderOutput(item) {
-  const canvas = document.createElement("canvas");
-  canvas.width = CONFIG.imageWidth;
-  canvas.height = CONFIG.imageHeight;
-  drawInto(canvas, item);
-  let blob = null;
-  for (const quality of [0.85, 0.7, 0.55]) {
-    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-    if (blob.size <= CONFIG.maxUploadBytes) break;
-  }
-  if (item.url) URL.revokeObjectURL(item.url);
-  item.blob = blob;
-  item.url = URL.createObjectURL(blob);
-}
-
-const cropper = { item: null, isNew: false, resolve: null, drag: null };
-const cropCanvas = $("crop-canvas");
-
-function openCropper(item, isNew) {
-  cropper.item = item;
-  cropper.isNew = isNew;
-  $("crop-caption").value = item.caption;
-  $("crop-help").checked = item.help;
-  $("crop-zoom").value = item.zoom;
-  $("crop-dialog").showModal();
-  requestAnimationFrame(drawCropper);
-  return new Promise((resolve) => (cropper.resolve = resolve));
-}
-
-function drawCropper() {
-  if (!cropper.item) return;
-  const width = Math.round(cropCanvas.clientWidth * (window.devicePixelRatio || 1));
-  if (cropCanvas.width !== width) {
-    cropCanvas.width = width;
-    cropCanvas.height = Math.round((width * 9) / 16);
-  }
-  drawInto(cropCanvas, cropper.item);
-}
-
-function closeCropper(ok) {
-  const { resolve } = cropper;
-  cropper.item = null;
-  cropper.drag = null;
-  if ($("crop-dialog").open) $("crop-dialog").close();
-  if (resolve) resolve(ok);
-  cropper.resolve = null;
-}
-
-cropCanvas.addEventListener("pointerdown", (e) => {
-  cropCanvas.setPointerCapture(e.pointerId);
-  cropper.drag = { x: e.clientX, y: e.clientY };
-});
-cropCanvas.addEventListener("pointermove", (e) => {
-  if (!cropper.drag || !cropper.item) return;
-  const k = cropCanvas.width / cropCanvas.clientWidth; // CSS-Pixel -> Canvas-Pixel
-  const { s } = geometry(cropper.item, cropCanvas.width, cropCanvas.height);
-  cropper.item.cx -= ((e.clientX - cropper.drag.x) * k) / s;
-  cropper.item.cy -= ((e.clientY - cropper.drag.y) * k) / s;
-  cropper.drag = { x: e.clientX, y: e.clientY };
-  drawCropper();
-});
-for (const type of ["pointerup", "pointercancel"]) {
-  cropCanvas.addEventListener(type, () => (cropper.drag = null));
-}
-cropCanvas.addEventListener(
-  "wheel",
-  (e) => {
-    if (!cropper.item) return;
-    e.preventDefault();
-    const zoom = cropper.item.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1);
-    cropper.item.zoom = Math.min(4, Math.max(1, zoom));
-    $("crop-zoom").value = cropper.item.zoom;
-    drawCropper();
-  },
-  { passive: false }
-);
-$("crop-zoom").addEventListener("input", (e) => {
-  if (!cropper.item) return;
-  cropper.item.zoom = Number(e.target.value);
-  drawCropper();
-});
-window.addEventListener("resize", drawCropper);
-
-$("crop-cancel").onclick = () => closeCropper(false);
-$("crop-dialog").addEventListener("cancel", (e) => {
-  e.preventDefault(); // Esc
-  closeCropper(false);
-});
-$("crop-ok").onclick = async () => {
-  const item = cropper.item;
-  if (!item) return;
-  item.caption = $("crop-caption").value.trim();
-  item.help = $("crop-help").checked;
-  $("crop-ok").disabled = true;
-  await renderOutput(item);
-  $("crop-ok").disabled = false;
-  if (cropper.isNew) prepared.push(item);
-  closeCropper(true);
-  renderPrepared();
-};
-
-// Bilder nacheinander zuschneiden – egal ob ausgewählt oder per Strg+V eingefügt
-const pendingFiles = [];
-let processingFiles = false;
-
+// Bilder nacheinander vorbereiten – egal ob ausgewählt oder per Strg+V eingefügt
 async function addFiles(files, context = null) {
-  pendingFiles.push(...files.map((file) => ({ file, context })));
-  if (processingFiles) return; // läuft schon – neue Bilder kommen einfach hinten dran
-  processingFiles = true;
-  while (pendingFiles.length) {
-    const { file, context: ctx } = pendingFiles.shift();
-    let source;
+  for (const file of files) {
+    let blob;
     try {
-      source = await loadSource(file);
+      blob = await prepareImage(file);
     } catch {
       $("upload-status").textContent = `„${file.name}“ kann dieser Browser nicht öffnen.`;
       continue;
     }
-    const item = {
-      source, zoom: 1, cx: source.width / 2, cy: source.height / 2,
-      caption: ctx ? ctx.caption : "", help: !!ctx, blob: null, url: null,
-    };
-    await openCropper(item, true);
+    prepared.push({ caption: context ? context.caption : "", help: !!context, blob, url: URL.createObjectURL(blob) });
+    renderPrepared();
   }
-  processingFiles = false;
+  // Fokus ins Namensfeld des neuesten Bildes, damit man direkt tippen kann
+  const inputs = $("prepared").querySelectorAll("input[type=text]");
+  if (inputs.length) inputs[inputs.length - 1].focus();
 }
 
 $("file-input").addEventListener("change", (e) => {
@@ -761,8 +641,6 @@ function renderPrepared() {
     const img = document.createElement("img");
     img.src = item.url;
     img.alt = item.caption || `Bild ${i + 1}`;
-    img.title = "Tippen zum Neu-Zuschneiden";
-    img.onclick = () => !uploading && openCropper(item, false);
     const fields = document.createElement("div");
     fields.className = "fields";
     const caption = document.createElement("input");
@@ -782,7 +660,16 @@ function renderPrepared() {
       renderPrepared();
     };
     fields.append(caption, remove);
-    card.append(img, fields);
+    const help = document.createElement("label");
+    help.className = "check item-help";
+    const box2 = Object.assign(document.createElement("input"), { type: "checkbox", checked: item.help });
+    box2.onchange = () => {
+      item.help = box2.checked;
+      card.classList.toggle("help", item.help);
+      renderPrepared();
+    };
+    help.append(box2, " Hilfe-Bild (rot umrandet)");
+    card.append(img, fields, help);
     box.append(card);
   });
   updateUploadButton();

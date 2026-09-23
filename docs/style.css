@@ -180,6 +180,7 @@ textarea {
 .check { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .item.help { box-shadow: 0 0 0 3px var(--accent); }
+.item-help { padding: 0 8px 8px; font-size: .85rem; }
 .item .help-tag { background: var(--accent); color: #fff; font-size: .75rem; font-weight: 700; padding: 2px 8px; }
 
 .task-list { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -198,9 +199,9 @@ textarea {
 .prepared { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .prepared:empty { display: none; }
 .item { background: var(--panel-2); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
-.item img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; cursor: pointer; display: block; }
+.item img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; display: block; }
 .item .fields { display: flex; gap: 6px; padding: 8px; }
-.item input { flex: 1; min-width: 0; }
+.item .fields input { flex: 1; min-width: 0; }
 .item .remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
 
 input[type="text"], input[type="password"] {
@@ -267,16 +268,5 @@ dialog {
   width: min(720px, calc(100vw - 32px));
 }
 dialog::backdrop { background: rgba(0, 0, 0, .7); }
-dialog form, #crop-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+dialog form { display: flex; flex-direction: column; gap: 12px; }
 
-#crop-canvas {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 8px;
-  touch-action: none;
-  cursor: grab;
-}
-#crop-canvas:active { cursor: grabbing; }
-.zoom { display: flex; align-items: center; gap: 10px; color: var(--muted); }
-.zoom input { flex: 1; }
