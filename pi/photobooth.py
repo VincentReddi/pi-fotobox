@@ -390,6 +390,11 @@ class Backchannel(threading.Thread):
         return self.publish({"type": "problem", "session": self.session, "id": f"{time.time():.3f}",
                              "kind": kind, "task": int(task), "letter": letter, "at": int(time.time() * 1000)})
 
+    def clear_message(self):
+        """Der Pi entfernt die Nachricht der Spielleitung (z. B. beim Start einer Aufnahme)."""
+        return self.publish({"type": "message", "session": self.session or "", "id": f"pi-{time.time():.3f}",
+                             "text": "", "by": "pi"})
+
     def presence(self, active):
         """Pi aktiv / inaktiv – die Webseite zeigt es der Spielleitung an."""
         return self.publish({"type": "presence", "who": "pi", "active": bool(active), "at": int(time.time() * 1000)})

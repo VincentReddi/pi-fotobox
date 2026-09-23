@@ -426,6 +426,17 @@ class App:
             self.wait_info.place(relx=0.5, rely=0.45, anchor="center")
         self.show("wait_images")
 
+    def clear_chat(self):
+        """Nachricht entfernen – hier und auf der Webseite (und damit auch nach einem Neustart)."""
+        self.chat_pending = False
+        if not self.chat:
+            return
+        self.chat = None
+        self.update_chat()
+        self.hide_overlays()
+        if self.backchannel:
+            threading.Thread(target=self.backchannel.clear_message, daemon=True).start()
+
     def send_reply(self, answer):
         if not self.chat or not self.backchannel:
             return
@@ -697,6 +708,7 @@ class App:
         self.run_batch(self.cfg["resend_count"], self.cfg["resend_countdown"], "Nachschub!", "")
 
     def run_batch(self, count, countdown, title, info):
+        self.clear_chat()  # jede Aufnahme (Starten und Nachschicken) entfernt die Nachricht der Spielleitung
         self.busy = True
         self.show_capture(title, str(countdown), info)
         threading.Thread(target=self.batch_worker, args=(count, countdown), daemon=True).start()

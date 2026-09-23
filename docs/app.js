@@ -596,10 +596,12 @@ $("clear-form").onsubmit = async (e) => {
 // --- Bilder an die Fotobox schicken: ganz normaler Upload, ohne Zuschneiden ---
 // Bilder bleiben im Originalformat. Nur die Dateigröße wird angepasst (längste Seite max. 1600 px, JPEG),
 // weil ntfy.sh ohne Konto höchstens 2 MB pro Bild annimmt.
-let prepared = []; // { caption, help, blob, url }
+let prepared = []; // { source, rotation, caption, help, blob, url }
 let uploading = false;
 
-async function prepareImage(file) {
+// Datei laden und auf Upload-Größe bringen (längste Seite max. imageMaxSide). Bleibt als Vorlage erhalten,
+// damit mehrfaches Drehen nicht jedes Mal neu komprimiert (sonst würde das Bild immer schlechter).
+async function loadSource(file) {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
@@ -614,28 +616,56 @@ async function prepareImage(file) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    let blob = null;
-    for (const quality of [0.9, 0.8, 0.65, 0.5]) {
-      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-      if (blob.size <= CONFIG.maxUploadBytes) break;
-    }
-    return blob;
+    return canvas;
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
+// Upload-Datei aus der Vorlage erzeugen, gedreht um item.rotation × 90° im Uhrzeigersinn.
+// Dauert bei großen Bildern ~1 s: item.ready sagt, wann die aktuelle Fassung fertig ist, und bei schnellem
+// Mehrfach-Drehen gewinnt immer die neueste Drehung (ältere Ergebnisse werden verworfen).
+function encodeItem(item) {
+  const token = (item.token = (item.token || 0) + 1);
+  item.ready = encodeRotated(item.source, item.rotation).then((blob) => {
+    if (token !== item.token) return; // inzwischen weitergedreht
+    if (item.url) URL.revokeObjectURL(item.url);
+    item.blob = blob;
+    item.url = URL.createObjectURL(blob);
+  });
+  return item.ready;
+}
+
+async function encodeRotated(source, rotation) {
+  const canvas = document.createElement("canvas");
+  const sideways = rotation % 2 === 1;
+  canvas.width = sideways ? source.height : source.width;
+  canvas.height = sideways ? source.width : source.height;
+  const ctx = canvas.getContext("2d");
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((rotation * Math.PI) / 2);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  let blob = null;
+  for (const quality of [0.9, 0.8, 0.65, 0.5]) {
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (blob.size <= CONFIG.maxUploadBytes) break;
+  }
+  return blob;
+}
+
 // Bilder nacheinander vorbereiten – egal ob ausgewählt oder per Strg+V eingefügt
 async function addFiles(files, context = null) {
   for (const file of files) {
-    let blob;
+    let source;
     try {
-      blob = await prepareImage(file);
+      source = await loadSource(file);
     } catch {
       $("upload-status").textContent = `„${file.name}“ kann dieser Browser nicht öffnen.`;
       continue;
     }
-    prepared.push({ caption: context ? context.caption : "", help: !!context, blob, url: URL.createObjectURL(blob) });
+    const item = { source, rotation: 0, caption: context ? context.caption : "", help: !!context, blob: null, url: null };
+    await encodeItem(item);
+    prepared.push(item);
     renderPrepared();
   }
   // Fokus ins Namensfeld des neuesten Bildes, damit man direkt tippen kann
@@ -688,7 +718,19 @@ function renderPrepared() {
       prepared = prepared.filter((p) => p !== item);
       renderPrepared();
     };
-    fields.append(caption, remove);
+    const rotate = document.createElement("button");
+    rotate.className = "remove";
+    rotate.textContent = "↻";
+    rotate.title = "90° drehen";
+    rotate.onclick = async () => {
+      if (uploading) return;
+      item.rotation = (item.rotation + 1) % 4;
+      img.classList.add("busy");
+      const ready = encodeItem(item);
+      await ready;
+      if (item.ready === ready) renderPrepared(); // nur die neueste Drehung anzeigen
+    };
+    fields.append(caption, rotate, remove);
     const help = document.createElement("label");
     help.className = "check item-help";
     const box2 = Object.assign(document.createElement("input"), { type: "checkbox", checked: item.help });
@@ -722,6 +764,7 @@ $("upload-images").onclick = async () => {
     while (prepared.length) {
       const item = prepared[0];
       $("upload-status").textContent = `Sende Bild ${sent + 1} von ${total} …`;
+      await item.ready; // falls gerade noch gedreht wird: erst die fertige Fassung schicken
       const meta = {
         type: "image",
         session: status.session,

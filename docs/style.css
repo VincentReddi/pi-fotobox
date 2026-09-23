@@ -212,6 +212,7 @@ textarea {
 .prepared:empty { display: none; }
 .item { background: var(--panel-2); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
 .item img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; display: block; }
+.item img.busy { opacity: .4; transition: opacity .2s; } /* wird gerade gedreht */
 .item .fields { display: flex; gap: 6px; padding: 8px; }
 .item .fields input { flex: 1; min-width: 0; }
 .item .remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
