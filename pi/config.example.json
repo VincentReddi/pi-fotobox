@@ -17,5 +17,6 @@
   "tasks": 5,
   "resend_count": 10,
   "resend_countdown": 15,
-  "web_password": ""
+  "web_password": "",
+  "clear_password": ""
 }

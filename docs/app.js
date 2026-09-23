@@ -262,6 +262,9 @@ function renderAdmin() {
   if (!show) return;
   $("review-panel").classList.toggle("highlight", status.state === "confirm");
   $("images-panel").classList.toggle("highlight", status.state === "images");
+  $("chat-panel").hidden = status.state !== "images"; // Nachrichten nur in der Bildphase
+  renderChat();
+  renderProblems();
   renderTaskList();
   updateUploadButton(); // die Liste selbst nicht neu bauen – sonst verliert ein gerade getipptes Namensfeld den Fokus
 }
@@ -287,6 +290,7 @@ function startApp() {
     return;
   }
   connectLive();
+  connectBack();
   setTimeout(loadArchive, 3000);
   setInterval(updateStage, 200);
 }
@@ -383,6 +387,184 @@ $("send-review").onclick = async () => {
   }
 };
 
+// --- Nachricht an die Fotobox (Bildphase) + Antworten OK / Egal / Neustart ---
+// Die Seite liest den Rückkanal mit: so sieht jedes Gerät der Spielleitung die aktuelle Nachricht und alle Antworten.
+// session -> { message: {id, text}, replies: [{message_id, answer, at}], problems: [{id, kind, task, letter, at}] }
+const chats = {};
+
+function chatFor(session) {
+  return (chats[session] ||= { message: null, replies: [], problems: [] });
+}
+
+function connectBack() {
+  const es = new EventSource(`${CONFIG.ntfy}/${backTopic}/sse?since=12h`);
+  es.onmessage = (e) => {
+    let data;
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event !== "message") return;
+      data = JSON.parse(msg.message);
+    } catch {
+      return;
+    }
+    if (data && data.type === "cleared") {
+      const pending = pendingClears.get(data.request);
+      if (pending) pending(data);
+      return;
+    }
+    if (!data || typeof data.session !== "string") return;
+    const chat = chatFor(data.session);
+    if (data.type === "message" && typeof data.text === "string") {
+      chat.message = data.text ? { id: String(data.id), text: data.text } : null;
+    } else if (data.type === "reply" && ["OK", "Egal", "Neustart"].includes(data.answer)) {
+      chat.replies.push({ message_id: String(data.message_id), answer: data.answer, at: Number(data.at) || Date.now() });
+    } else if (data.type === "problem" && PROBLEM_TEXT[data.kind] && isSmallInt(data.task) &&
+               /^[A-Z]?$/.test(data.letter ?? "")) {
+      chat.problems.push({ id: String(data.id), kind: data.kind, task: data.task, letter: data.letter || "",
+                           at: Number(data.at) || Date.now() });
+    } else {
+      return;
+    }
+    if (status && data.session === status.session) {
+      renderChat();
+      renderProblems();
+    }
+  };
+}
+
+// --- Notfall-Meldungen der Fotobox ("Problem melden") + Hilfe-Bild als Antwort ---
+const PROBLEM_TEXT = { missing: "fehlt", unsolvable: "ist nicht lösbar" };
+let helpContext = null; // gesetzt über "Hilfe-Bild schicken": neue Bilder sind dann Hilfe-Bilder mit passendem Namen
+
+function renderProblems() {
+  if (!status || !status.session) return;
+  const problems = chatFor(status.session).problems;
+  $("problems-panel").hidden = !problems.length;
+  const list = $("problems-list");
+  list.replaceChildren();
+  for (const p of [...problems].reverse()) {
+    const label = `Aufgabe ${p.task}${p.letter}`;
+    const row = document.createElement("div");
+    row.className = "problem";
+    const what = Object.assign(document.createElement("span"), {
+      className: "what",
+      textContent: `⚠ ${label} ${PROBLEM_TEXT[p.kind]}`,
+    });
+    const when = Object.assign(document.createElement("span"), { className: "when", textContent: formatTime(p.at) });
+    const help = Object.assign(document.createElement("button"), {
+      className: "btn danger",
+      textContent: "Hilfe-Bild schicken",
+    });
+    help.onclick = () => {
+      helpContext = { caption: `Hilfe zu ${label}` };
+      $("file-input").click();
+    };
+    row.append(what, when, help);
+    list.append(row);
+  }
+}
+
+const formatTime = (ms) => new Date(ms).toLocaleTimeString("de-DE");
+
+function renderChat() {
+  if (!status || !status.session) return;
+  const { message, replies } = chatFor(status.session);
+  $("chat-current").hidden = !message;
+  $("chat-clear").hidden = !message;
+  if (message) $("chat-current-text").textContent = message.text;
+
+  const box = $("chat-replies");
+  box.replaceChildren();
+  const mine = message ? replies.filter((r) => r.message_id === message.id).reverse() : [];
+  box.hidden = !message;
+  if (!message) return;
+  if (!mine.length) {
+    box.append(Object.assign(document.createElement("div"), { className: "reply", textContent: "Noch keine Antwort" }));
+    return;
+  }
+  mine.slice(0, 8).forEach((r, i) => {
+    const line = document.createElement("div");
+    line.className = `reply${i === 0 ? " latest" : ""}`;
+    const answer = document.createElement("b");
+    answer.className = r.answer;
+    answer.textContent = r.answer;
+    line.append(i === 0 ? "Antwort: " : "", answer, ` · ${formatTime(r.at)}`);
+    box.append(line);
+  });
+}
+
+async function sendChat(text) {
+  $("chat-send").disabled = $("chat-clear").disabled = true;
+  try {
+    await publishBack({ type: "message", session: status.session, id: Date.now().toString(36), text });
+    $("chat-status").textContent = text ? "Gesendet ✓" : "Nachricht entfernt";
+    if (text) $("chat-text").value = "";
+  } catch (err) {
+    $("chat-status").textContent = `Senden fehlgeschlagen: ${err.message}`;
+  } finally {
+    $("chat-send").disabled = $("chat-clear").disabled = false;
+  }
+}
+
+$("chat-send").onclick = () => {
+  const text = $("chat-text").value.trim();
+  if (text) sendChat(text);
+};
+$("chat-clear").onclick = () => sendChat("");
+
+// --- Gespeicherte Bilder auf der Fotobox löschen (eigenes Lösch-Passwort) ---
+// Das Passwort steht nur in der config.json auf dem Pi und wird auch dort geprüft – hier im öffentlichen
+// Code steht es nicht. Über ntfy.sh geht nur ein Hash. Muss zu clear_hash() in pi/photobooth.py passen.
+const pendingClears = new Map(); // Anfrage-ID -> Callback für die Antwort des Pi
+
+async function clearHash(password) {
+  const data = new TextEncoder().encode(`${password}:${CONFIG.ntfyTopic}:clear`);
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  return [...hash].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+$("clear-archive").onclick = () => {
+  $("clear-error").hidden = true;
+  $("clear-password").value = "";
+  $("clear-dialog").showModal();
+};
+$("clear-cancel").onclick = () => $("clear-dialog").close();
+
+$("clear-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const password = $("clear-password").value.trim();
+  if (!password) return;
+  const request = Date.now().toString(36);
+  $("clear-submit").disabled = true;
+  $("clear-submit").textContent = "Lösche …";
+  const answer = new Promise((resolve) => {
+    pendingClears.set(request, resolve);
+    setTimeout(() => resolve(null), 15000); // keine Antwort -> Fotobox aus?
+  });
+  try {
+    await publishBack({ type: "clear_archive", request, hash: await clearHash(password) });
+    const result = await answer;
+    if (!result) {
+      $("clear-error").textContent = "Keine Antwort von der Fotobox – ist sie eingeschaltet?";
+      $("clear-error").hidden = false;
+    } else if (!result.ok) {
+      $("clear-error").textContent = result.reason || "Löschen abgelehnt";
+      $("clear-error").hidden = false;
+    } else {
+      $("clear-dialog").close();
+      const n = Number(result.count) || 0;
+      $("clear-status").textContent = `${n} ${n === 1 ? "Bild" : "Bilder"} auf der Fotobox gelöscht ✓`;
+    }
+  } catch (err) {
+    $("clear-error").textContent = `Senden fehlgeschlagen: ${err.message}`;
+    $("clear-error").hidden = false;
+  } finally {
+    pendingClears.delete(request);
+    $("clear-submit").disabled = false;
+    $("clear-submit").textContent = "Löschen";
+  }
+};
+
 // --- Bilder vorbereiten (16:9 zuschneiden + benennen) und an die Fotobox schicken ---
 let prepared = []; // { source, zoom, cx, cy, caption, blob, url }
 let uploading = false;
@@ -447,6 +629,7 @@ function openCropper(item, isNew) {
   cropper.item = item;
   cropper.isNew = isNew;
   $("crop-caption").value = item.caption;
+  $("crop-help").checked = item.help;
   $("crop-zoom").value = item.zoom;
   $("crop-dialog").showModal();
   requestAnimationFrame(drawCropper);
@@ -516,6 +699,7 @@ $("crop-ok").onclick = async () => {
   const item = cropper.item;
   if (!item) return;
   item.caption = $("crop-caption").value.trim();
+  item.help = $("crop-help").checked;
   $("crop-ok").disabled = true;
   await renderOutput(item);
   $("crop-ok").disabled = false;
@@ -528,12 +712,12 @@ $("crop-ok").onclick = async () => {
 const pendingFiles = [];
 let processingFiles = false;
 
-async function addFiles(files) {
-  pendingFiles.push(...files);
+async function addFiles(files, context = null) {
+  pendingFiles.push(...files.map((file) => ({ file, context })));
   if (processingFiles) return; // läuft schon – neue Bilder kommen einfach hinten dran
   processingFiles = true;
   while (pendingFiles.length) {
-    const file = pendingFiles.shift();
+    const { file, context: ctx } = pendingFiles.shift();
     let source;
     try {
       source = await loadSource(file);
@@ -541,7 +725,10 @@ async function addFiles(files) {
       $("upload-status").textContent = `„${file.name}“ kann dieser Browser nicht öffnen.`;
       continue;
     }
-    const item = { source, zoom: 1, cx: source.width / 2, cy: source.height / 2, caption: "", blob: null, url: null };
+    const item = {
+      source, zoom: 1, cx: source.width / 2, cy: source.height / 2,
+      caption: ctx ? ctx.caption : "", help: !!ctx, blob: null, url: null,
+    };
     await openCropper(item, true);
   }
   processingFiles = false;
@@ -550,8 +737,10 @@ async function addFiles(files) {
 $("file-input").addEventListener("change", (e) => {
   const files = [...e.target.files];
   e.target.value = ""; // dieselbe Datei später nochmal wählbar
-  addFiles(files);
+  addFiles(files, helpContext);
+  helpContext = null;
 });
+$("file-input").addEventListener("cancel", () => (helpContext = null)); // Auswahl abgebrochen
 
 // Strg+V: kopiertes Bild (Screenshot, "Bild kopieren" im Browser, …) direkt übernehmen
 document.addEventListener("paste", (e) => {
@@ -567,7 +756,8 @@ function renderPrepared() {
   box.replaceChildren();
   prepared.forEach((item, i) => {
     const card = document.createElement("div");
-    card.className = "item";
+    card.className = `item${item.help ? " help" : ""}`;
+    if (item.help) card.append(Object.assign(document.createElement("span"), { className: "help-tag", textContent: "Hilfe-Bild" }));
     const img = document.createElement("img");
     img.src = item.url;
     img.alt = item.caption || `Bild ${i + 1}`;
@@ -620,6 +810,7 @@ $("upload-images").onclick = async () => {
         type: "image",
         session: status.session,
         caption: item.caption.trim(),
+        help: !!item.help, // auf der Fotobox rot umrandet
         upload,
         index: sent + 1,
         count: total,

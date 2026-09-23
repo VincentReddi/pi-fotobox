@@ -72,6 +72,11 @@ Bei jedem Start wird der Branch `photos` zurückgesetzt, **alle alten Fotos vers
 3. Der Pi zeigt „Alle Aufgaben angekommen“ oder „Es fehlen: Aufgaben 3, 7“. Mit **10 Fotos nachschicken** kommen weitere Fotos dazu, die auf der Webseite grün umrandet sind. **Weiter** geht jederzeit.
 4. Danach wartet der Pi auf Bilder. Die Spielleitung wählt Bilder aus oder fügt ein kopiertes Bild mit **Strg + V** ein, schneidet sie auf **16:9** zu, gibt ihnen einen Namen und schickt sie ab.
 5. Am Pi erscheinen die Bilder mit ihrem Namen. Tippen links oder rechts bzw. Wischen blättert. Der kleine **☰**-Knopf unten links öffnet das Menü mit **Neue Runde**, der Name bleibt dabei sichtbar.
+6. Während der Bildphase kann die Spielleitung **optional eine Nachricht** an die Fotobox schicken. Ein neuer Text ersetzt den alten. Am Pi antwortest du beliebig oft mit **OK**, **Egal** oder **Neustart**, und die Webseite zeigt jede Antwort mit Uhrzeit. Im Bildbetrachter öffnet **✉** unten rechts die Nachricht. Der Knopf ist rot, solange sie unbeantwortet ist. „Neustart“ ist nur eine Antwort an die Spielleitung und startet keine neue Runde. Wichtige Knöpfe (**Neustart** und **Neue Runde**) müssen **1,5 Sekunden gedrückt gehalten** werden. Ein Balken im Knopf zeigt den Fortschritt, und wer zu früh loslässt, löst nichts aus.
+
+7. **Problem melden (Notfall):** Im Bildbetrachter führt ☰ → **Problem melden** zu einem eigenen Bildschirm. Dort wählst du **Aufgabe fehlt** oder **Nicht lösbar**, dann mit − / + die Aufgabennummer und optional einen Buchstaben (z. B. 3B), und tippst auf **Senden**. Auf der Webseite erscheint die Meldung rot umrandet unter „Meldungen der Fotobox“. Mit **Hilfe-Bild schicken** schickt die Spielleitung ein Bild, das auf der Fotobox **rot umrandet** mit „Hilfe“-Schild erscheint, auch später unter „Bilder“. Im Zuschneider lässt sich jedes Bild per Häkchen als Hilfe-Bild markieren.
+
+**Gespeicherte Bilder:** Alle Bilder der Spielleitung werden mit ihrem Namen dauerhaft gespeichert (`pi/fotos/<runde>/empfangen/`, Name in der `.json`-Datei daneben). Auf dem Startbildschirm öffnet **Bilder** oben links alle gespeicherten Bilder direkt im normalen Betrachter, beginnend beim neuesten. Das funktioniert auch nach einem Neustart des Pi. Die Spielleitung kann sie auf der Webseite über **Alle gespeicherten Bilder löschen** entfernen. Dafür braucht sie das Lösch-Passwort (`clear_password`). Es steht nur in der `config.json` auf dem Pi, wird dort geprüft und geht nie im Klartext über ntfy.sh. Die eigenen Fotos des Pi bleiben dabei erhalten.
 
 Technik: Rückmeldungen und Bilder laufen über einen zweiten ntfy-Kanal, dessen Name aus dem Passwort berechnet wird (SHA-256). Das Passwort selbst steht nirgends auf der Webseite. Bilder dürfen ohne ntfy-Konto maximal 2 MB groß sein (1280×720-JPEG, reicht locker) und verfallen bei ntfy.sh nach 3 Stunden. Der Pi speichert sie sofort unter `pi/fotos/<session>/empfangen/`. Für die Bildanzeige braucht der Pi `sudo apt install -y python3-pil.imagetk`.
 
@@ -102,6 +107,7 @@ journalctl -u photobooth -f   # Log ansehen
 | `resend_count` | 10             | Fotos beim Nachschicken |
 | `resend_countdown` | 15         | Countdown beim Nachschicken (Sekunden) |
 | `web_password` | leer           | Passwort der Spielleitung auf der Webseite (ohne: kein Rückkanal) |
+| `clear_password` | leer         | Passwort zum Löschen der gespeicherten Bilder (ohne: Löschen nicht möglich) |
 
 Lokale Kopien der Fotos liegen zusätzlich in `pi/fotos/<session>/`.
 

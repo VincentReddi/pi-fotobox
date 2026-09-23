@@ -127,6 +127,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 }
 .btn.primary { background: var(--green); color: #0b2415; }
 .btn.secondary { background: var(--panel-2); color: var(--text); }
+.btn.danger { background: #c9302c; color: #fff; }
+#clear-archive { align-self: flex-start; }
 .btn:disabled { opacity: .45; cursor: default; }
 .file-btn { align-self: flex-start; }
 .add-row { align-items: center; }
@@ -140,6 +142,45 @@ kbd {
   font-size: .85em;
   color: var(--text);
 }
+
+.optional { font-size: .8rem; font-weight: 500; color: var(--muted); margin-left: 6px; }
+textarea {
+  background: var(--bg);
+  border: 1px solid #3a3f48;
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  resize: vertical;
+}
+.chat-current { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+.chat-current p { margin: 4px 0 0; white-space: pre-wrap; }
+.chat-replies { display: flex; flex-direction: column; gap: 4px; }
+.reply { color: var(--muted); font-size: .9rem; }
+.reply b { font-weight: 700; }
+.reply.latest { font-size: 1.15rem; color: var(--text); }
+.reply .OK { color: var(--green); }
+.reply .Egal { color: #c9ccd3; }
+.reply .Neustart { color: #7fa6ff; }
+
+.panel.alert { box-shadow: 0 0 0 2px var(--accent); }
+.problems { display: flex; flex-direction: column; gap: 8px; }
+.problem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.problem .what { font-weight: 700; color: var(--accent); }
+.problem .when { color: var(--muted); font-size: .9rem; }
+.problem button { margin-left: auto; }
+.check { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.item.help { box-shadow: 0 0 0 3px var(--accent); }
+.item .help-tag { background: var(--accent); color: #fff; font-size: .75rem; font-weight: 700; padding: 2px 8px; }
 
 .task-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .task {

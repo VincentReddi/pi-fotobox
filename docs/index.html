@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pi Fotobox</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <header>
@@ -43,6 +43,28 @@
       <p id="review-status" class="hint"></p>
     </section>
 
+    <section id="problems-panel" class="panel alert" hidden>
+      <h2>⚠ Meldungen der Fotobox</h2>
+      <p class="hint">Die Fotobox meldet ein Problem mit einer Aufgabe. Schick ihr ein Hilfe-Bild, das auf der Fotobox rot umrandet erscheint.</p>
+      <div id="problems-list" class="problems"></div>
+    </section>
+
+    <section id="chat-panel" class="panel" hidden>
+      <h2>Nachricht an die Fotobox <span class="optional">optional</span></h2>
+      <p class="hint">Der Text erscheint auf der Fotobox. Ein neuer Text ersetzt den vorherigen. Die Fotobox kann mit OK, Egal oder Neustart antworten.</p>
+      <textarea id="chat-text" maxlength="300" rows="3" placeholder="Text an die Fotobox …"></textarea>
+      <div class="row">
+        <button id="chat-send" class="btn primary">Senden</button>
+        <button id="chat-clear" class="btn secondary" hidden>Nachricht entfernen</button>
+      </div>
+      <div id="chat-current" class="chat-current" hidden>
+        <span class="hint">Gerade auf der Fotobox:</span>
+        <p id="chat-current-text"></p>
+      </div>
+      <div id="chat-replies" class="chat-replies" hidden></div>
+      <p id="chat-status" class="hint"></p>
+    </section>
+
     <section id="images-panel" class="panel" hidden>
       <h2>Bilder an die Fotobox schicken</h2>
       <p class="hint">Jedes Bild wird auf 16:9 zugeschnitten und auf dem Display der Fotobox mit seinem Namen gezeigt.</p>
@@ -60,6 +82,13 @@
 
     <h2 id="session-title" class="session-title" hidden></h2>
     <section id="gallery" class="gallery"></section>
+
+    <section id="storage-panel" class="panel">
+      <h2>Gespeicherte Bilder auf der Fotobox</h2>
+      <p class="hint">Die Fotobox bewahrt alle Bilder auf, die du ihr geschickt hast, auch nach einem Neustart. Hier kannst du sie mit dem Lösch-Passwort alle entfernen.</p>
+      <button id="clear-archive" class="btn danger">Alle gespeicherten Bilder löschen</button>
+      <p id="clear-status" class="hint"></p>
+    </section>
     </div>
   </main>
 
@@ -76,12 +105,26 @@
     <canvas id="crop-canvas"></canvas>
     <label class="zoom">Zoom <input type="range" id="crop-zoom" min="1" max="4" step="0.01" value="1"></label>
     <input type="text" id="crop-caption" maxlength="80" placeholder="Name des Bildes (wird auf der Fotobox angezeigt)">
+    <label class="check"><input type="checkbox" id="crop-help"> Hilfe-Bild – auf der Fotobox rot umrandet</label>
     <div class="row">
       <button type="button" id="crop-cancel" class="btn secondary">Abbrechen</button>
       <button type="button" id="crop-ok" class="btn primary">Übernehmen</button>
     </div>
   </dialog>
 
-  <script src="app.js?v=4"></script>
+  <dialog id="clear-dialog">
+    <form id="clear-form">
+      <h2>Alle gespeicherten Bilder löschen?</h2>
+      <p class="hint">Alle Bilder, die die Fotobox von dir bekommen hat, werden auf der Fotobox gelöscht. Das lässt sich nicht rückgängig machen.</p>
+      <input type="password" id="clear-password" placeholder="Lösch-Passwort" autocomplete="off" required>
+      <p id="clear-error" class="error" hidden></p>
+      <div class="row">
+        <button type="button" id="clear-cancel" class="btn secondary">Abbrechen</button>
+        <button type="submit" id="clear-submit" class="btn danger">Löschen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js?v=7"></script>
 </body>
 </html>

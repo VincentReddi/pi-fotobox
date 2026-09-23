@@ -11,8 +11,10 @@ Rückmeldungen zu den Aufgaben und Bilder an den Pi zurück.
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import queue
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -41,6 +43,9 @@ DEFAULTS = {
     "resend_count": 10,  # Fotos beim Nachschicken
     "resend_countdown": 15,  # Countdown beim Nachschicken
     "web_password": "",  # Passwort der Spielleitung auf der Webseite (Rückkanal)
+    # Passwort, mit dem die Spielleitung die gespeicherten Bilder am Pi löschen darf.
+    # Nur in config.json eintragen – diese Datei landet nicht im (öffentlichen) Repo.
+    "clear_password": "",
 }
 
 
@@ -330,12 +335,19 @@ def back_topic(cfg):
     return f"{cfg['ntfy_topic']}-r-{digest[:24]}"
 
 
-class Backchannel(threading.Thread):
-    """Empfängt Rückmeldungen und Bilder der Spielleitung von der Webseite (über ntfy.sh).
+REPLIES = ("OK", "Egal", "Neustart")  # Antworten des Pi auf eine Nachricht der Spielleitung
 
-    on_event("review", {"missing": [...]}) und on_event("image", pfad, überschrift, upload_id).
+
+class Backchannel(threading.Thread):
+    """Empfängt Rückmeldungen, Bilder und Nachrichten der Spielleitung von der Webseite (über ntfy.sh)
+    und schickt die Antworten des Pi zurück.
+
+    on_event("review", {"missing": [...]}), on_event("image", pfad, überschrift, upload_id, hilfe) und
+    on_event("message", {"id": ..., "text": ...}) – leerer Text = Nachricht entfernt.
     Angenommen wird nur, was zur aktuellen Runde (self.session) gehört.
     """
+
+    PROBLEM_KINDS = ("missing", "unsolvable")  # "Aufgabe fehlt" / "Aufgabe nicht lösbar"
 
     MAX_IMAGE_BYTES = 3_000_000
 
@@ -355,6 +367,28 @@ class Backchannel(threading.Thread):
             r.raise_for_status()
         except requests.RequestException as e:
             print(f"Rückkanal: Hallo fehlgeschlagen ({e})")
+
+    def publish(self, payload):
+        """Nachricht vom Pi an die Webseite; True = angekommen."""
+        try:
+            r = requests.post(f"{NTFY}/{self.topic}", data=json.dumps(payload),
+                              headers=ntfy_headers(self.cfg), timeout=10)
+            r.raise_for_status()
+            return True
+        except requests.RequestException as e:
+            print(f"Rückkanal: Senden fehlgeschlagen ({e})")
+            return False
+
+    def reply(self, message_id, answer):
+        """Antwort (OK / Egal / Neustart) auf die aktuelle Nachricht; die Webseite zeigt sie an."""
+        return self.publish({"type": "reply", "session": self.session, "message_id": message_id,
+                             "answer": answer, "at": int(time.time() * 1000)})
+
+    def report(self, kind, task, letter=""):
+        """Notfall-Meldung an die Spielleitung: Aufgabe fehlt / ist nicht lösbar (z. B. Aufgabe 3B)."""
+        assert kind in self.PROBLEM_KINDS
+        return self.publish({"type": "problem", "session": self.session, "id": f"{time.time():.3f}",
+                             "kind": kind, "task": int(task), "letter": letter, "at": int(time.time() * 1000)})
 
     def run(self):
         self.hello()
@@ -380,15 +414,38 @@ class Backchannel(threading.Thread):
 
     def handle(self, msg):
         data = json.loads(msg.get("message") or "null")
+        if isinstance(data, dict) and data.get("type") == "clear_archive":
+            self.handle_clear(data)  # gilt unabhängig von der Runde
+            return
         if not isinstance(data, dict) or not self.session or data.get("session") != self.session:
             return
         if data.get("type") == "review":
             missing = sorted({int(x) for x in data.get("missing", []) if isinstance(x, int) and 0 < x < 1000})
             self.on_event("review", {"missing": missing})
         elif data.get("type") == "image" and msg.get("attachment"):
-            path = self.download(msg["attachment"], msg["id"])
             caption = " ".join(str(data.get("caption", "")).split())[:80]
-            self.on_event("image", str(path), caption, str(data.get("upload", ""))[:40])
+            upload = str(data.get("upload", ""))[:40]
+            help_image = data.get("help") is True  # Antwort auf eine Notfall-Meldung -> rot umrandet
+            path = self.download(msg["attachment"], msg["id"])
+            # Überschrift neben dem Bild speichern -> Archiv am Pi (übersteht Neustarts)
+            meta = {"caption": caption, "received": int(time.time()), "upload": upload, "help": help_image}
+            path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            self.on_event("image", str(path), caption, upload, help_image)
+        elif data.get("type") == "message":
+            text = str(data.get("text", "")).replace("\r", "").strip()[:300]
+            self.on_event("message", {"id": str(data.get("id", ""))[:40], "text": text})
+
+    def handle_clear(self, data):
+        """Spielleitung will alle gespeicherten Bilder löschen – nur mit richtigem Lösch-Passwort."""
+        expected = clear_hash(self.cfg)
+        ok = bool(expected) and hmac.compare_digest(str(data.get("hash", "")), expected)
+        count = delete_received_images() if ok else 0
+        reason = "" if ok else "Passwort falsch" if expected else "Auf der Fotobox ist kein Lösch-Passwort eingerichtet"
+        print(f"Rückkanal: Bilder löschen -> {'gelöscht: ' + str(count) if ok else reason}")
+        self.publish({"type": "cleared", "request": str(data.get("request", ""))[:40], "ok": ok, "count": count,
+                      "reason": reason})
+        if ok:
+            self.on_event("archive_cleared", count)
 
     def download(self, attachment, msg_id):
         url = attachment.get("url", "")
@@ -403,6 +460,37 @@ class Backchannel(threading.Thread):
         path = folder / f"{msg_id}.jpg"
         path.write_bytes(r.content)
         return path
+
+
+def clear_hash(cfg):
+    """Das Lösch-Passwort geht nie im Klartext über ntfy.sh. Muss zu clearHash() in docs/app.js passen."""
+    password = cfg["clear_password"].strip()
+    if not password:
+        return ""
+    return hashlib.sha256(f"{password}:{cfg['ntfy_topic']}:clear".encode("utf-8")).hexdigest()
+
+
+def received_images():
+    """Alle je von der Spielleitung empfangenen Bilder, ältestes zuerst: [(pfad, überschrift, hilfe), ...]"""
+    images = []
+    for path in (BASE / "fotos").glob("*/empfangen/*.jpg"):
+        try:
+            meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        received = meta.get("received") or path.stat().st_mtime
+        images.append((received, str(path), str(meta.get("caption", "")), meta.get("help") is True))
+    images.sort()
+    return [(p, c, h) for _, p, c, h in images]
+
+
+def delete_received_images():
+    """Löscht alle empfangenen Bilder (die eigenen Fotos des Pi bleiben). Gibt die Anzahl zurück."""
+    folders = list((BASE / "fotos").glob("*/empfangen"))
+    count = sum(len(list(folder.glob("*.jpg"))) for folder in folders)
+    for folder in folders:
+        shutil.rmtree(folder, ignore_errors=True)
+    return count
 
 
 def show_limits(gh, cfg):
