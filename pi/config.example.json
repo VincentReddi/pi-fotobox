@@ -1,0 +1,12 @@
+{
+  "token": "github_pat_HIER_DEIN_TOKEN",
+  "owner": "DEIN-GITHUB-NAME",
+  "repo": "pi-fotobox",
+  "branch": "photos",
+  "button_pin": 17,
+  "countdown": 15,
+  "count": 30,
+  "interval": 1.0,
+  "resolution": [1920, 1080],
+  "jpeg_quality": 85
+}
