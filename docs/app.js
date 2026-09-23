@@ -4,7 +4,7 @@ const CONFIG = {
   owner: "",
   repo: "",
   branch: "photos",
-  pollMs: 2500,
+  ntfyTopic: "pi-fotobox-f5849b5b30bccc45", // muss zu "ntfy_topic" in pi/photobooth.py passen
 };
 
 const $ = (id) => document.getElementById(id);
@@ -22,45 +22,61 @@ function detectRepo() {
   }
 }
 
-const statusUrl = () =>
-  `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/status.json?ref=${CONFIG.branch}`;
 const photoUrl = (path) =>
   `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/${CONFIG.branch}/${path}`;
 
-let lastSha = null;
 let status = null;
 let shownSession = null;
 let lastCountdownValue = null;
 
-async function poll() {
-  let delay = CONFIG.pollMs;
-  try {
-    // cache: "no-cache" -> Browser schickt If-None-Match; 304-Antworten zählen nicht ins API-Limit
-    const res = await fetch(statusUrl(), { cache: "no-cache" });
-    if (res.status === 404) {
-      setMessage("Noch keine Aufnahmen – drück den Knopf an der Fotobox!");
-    } else if (res.status === 403 || res.status === 429) {
-      setMessage("GitHub-API-Limit erreicht, versuche es gleich wieder …");
-      delay = 60000;
-    } else if (res.ok) {
-      const json = await res.json();
-      if (json.sha !== lastSha) {
-        lastSha = json.sha;
-        status = JSON.parse(decodeBase64(json.content));
-        render();
-      }
-    } else {
-      setMessage(`Fehler beim Laden (${res.status})`);
-    }
-  } catch (e) {
-    setMessage("Keine Verbindung zu GitHub …");
-  }
-  setTimeout(poll, delay);
+// ntfy-Themen sind öffentlich – nur gültig aussehende Daten übernehmen
+function isValidStatus(s) {
+  return (
+    s && typeof s.session === "string" && /^[\w-]+$/.test(s.session) &&
+    Array.isArray(s.photos) && s.photos.every((p) => /^sessions\/[\w-]+\/\d{3}\.jpg$/.test(p))
+  );
 }
 
-function decodeBase64(b64) {
-  const bytes = Uint8Array.from(atob(b64.replace(/\n/g, "")), (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+function applyStatus(s) {
+  if (!isValidStatus(s)) return;
+  status = s;
+  render();
+}
+
+// Live-Kanal: der Pi schickt jeden Statuswechsel an ntfy.sh, die Seite bekommt ihn per Server-Sent Events.
+// since=latest liefert beim (Wieder-)Verbinden sofort den letzten Stand (ntfy.sh speichert 12 h).
+function connectLive() {
+  const es = new EventSource(`https://ntfy.sh/${CONFIG.ntfyTopic}/sse?since=latest`);
+  es.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event === "message") applyStatus(JSON.parse(msg.message));
+    } catch {
+      // fremde oder kaputte Nachricht ignorieren
+    }
+  };
+  es.onerror = () => {
+    if (!status) setMessage("Verbinde …"); // EventSource verbindet sich selbst neu
+  };
+}
+
+// Fallback für ältere Sessions (> 12 h): einmalig status.json aus dem Branch "photos" lesen.
+// Nur eine Anfrage pro Seitenaufruf – bleibt weit unter GitHubs 60 Anfragen/Stunde.
+async function loadArchive() {
+  if (status) return;
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/status.json?ref=${CONFIG.branch}`
+    );
+    if (res.ok && !status) {
+      const json = await res.json();
+      const bytes = Uint8Array.from(atob(json.content.replace(/\n/g, "")), (c) => c.charCodeAt(0));
+      applyStatus(JSON.parse(new TextDecoder().decode(bytes)));
+    }
+  } catch {
+    // egal – dann eben nur live
+  }
+  if (!status) setMessage("Noch keine Aufnahmen – drück den Knopf an der Fotobox!");
 }
 
 function setMessage(text) {
@@ -175,6 +191,7 @@ detectRepo();
 if (!CONFIG.owner || !CONFIG.repo) {
   setMessage("Repo unbekannt – setze owner/repo in app.js oder öffne die Seite mit ?owner=…&repo=…");
 } else {
-  poll();
+  connectLive();
+  setTimeout(loadArchive, 3000);
   setInterval(updateStage, 200);
 }

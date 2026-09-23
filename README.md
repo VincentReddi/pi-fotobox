@@ -3,12 +3,14 @@
 Knopf am Raspberry Pi drücken → 15 s Countdown → 30 Fotos → jedes Foto erscheint sofort auf der GitHub-Pages-Seite.
 
 ```
-[Knopf] → photobooth.py ──(GitHub API)──► Branch "photos": status.json + sessions/<zeit>/001.jpg …
-                                                   ▲
-                    GitHub Pages (docs/) ──fragt alle 2,5 s ab──┘
+[Knopf] → photobooth.py ──(GitHub API)──► Branch "photos": sessions/<zeit>/001.jpg … (+ status.json am Ende)
+               │                                        │ Bilder
+               └──(ntfy.sh: Countdown / neue Fotos)──► GitHub Pages (docs/)  ◄── live per Server-Sent Events
 ```
 
 Die Fotos landen im separaten Branch `photos`. Dadurch löst nicht jedes Foto einen neuen Pages-Build aus und die Bilder sind sofort sichtbar.
+
+Live-Meldungen laufen über [ntfy.sh](https://ntfy.sh), einen kostenlosen Push-Dienst ohne Anmeldung. Direkt über die GitHub-API wäre das nicht möglich: Ohne Login erlaubt sie nur 60 Anfragen pro Stunde und IP. Das Thema (`ntfy_topic` in `pi/photobooth.py` bzw. `ntfyTopic` in `docs/app.js`) muss auf beiden Seiten gleich sein. ntfy.sh erlaubt 250 Nachrichten pro Tag, der Pi sendet pro Session ungefähr 10.
 
 > ⚠️ GitHub Pages (kostenlos) braucht ein **öffentliches** Repo, die Fotos sind also öffentlich einsehbar.
 
@@ -37,7 +39,9 @@ nano config.json   # token, owner, repo eintragen
 python3 photobooth.py
 ```
 
-Ohne Taster testen: `python3 photobooth.py --keyboard` (Start mit Enter).
+Ohne Taster testen: `python3 -s photobooth.py --keyboard` (Start mit Enter).
+
+`-s` sorgt dafür, dass Python per pip in `~/.local` installierte Pakete ignoriert. Ein pip-numpy 2.x dort bricht sonst picamera2 (`numpy.dtype size changed …`).
 
 ### Autostart beim Booten
 

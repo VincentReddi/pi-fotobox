@@ -3,7 +3,8 @@
 
 Knopf drücken -> 15 s Countdown -> 30 Fotos mit dem Kameramodul ->
 jedes Foto wird sofort in den Branch "photos" des GitHub-Repos hochgeladen.
-Die GitHub-Pages-Seite liest status.json aus diesem Branch und zeigt die Bilder live an.
+Live-Updates (Countdown, neue Fotos) gehen über ntfy.sh an die GitHub-Pages-Seite;
+status.json im Branch "photos" hält die letzte fertige Session für spätere Besucher fest.
 """
 import argparse
 import base64
@@ -19,6 +20,8 @@ import requests
 BASE = Path(__file__).resolve().parent
 API = "https://api.github.com"
 STATUS_PATH = "status.json"
+NTFY = "https://ntfy.sh"
+PUBLISH_EVERY = 4  # s – ntfy.sh erlaubt 250 Nachrichten pro Tag
 
 DEFAULTS = {
     "branch": "photos",
@@ -28,6 +31,7 @@ DEFAULTS = {
     "interval": 1.0,
     "resolution": [1920, 1080],
     "jpeg_quality": 85,
+    "ntfy_topic": "pi-fotobox-f5849b5b30bccc45",  # muss zu docs/app.js passen
 }
 
 
@@ -41,6 +45,20 @@ def load_config():
         if not cfg.get(key):
             raise SystemExit(f"config.json: '{key}' ist nicht gesetzt.")
     return cfg
+
+
+def check(r):
+    """Wie raise_for_status(), aber mit der Fehlermeldung von GitHub."""
+    if r.ok:
+        return
+    try:
+        msg = r.json().get("message", "")
+    except ValueError:
+        msg = r.text[:200]
+    hint = ""
+    if r.status_code in (401, 403):
+        hint = "\n  → Token prüfen: Zugriff auf dieses Repo und 'Contents: Read and write'?"
+    raise requests.HTTPError(f"GitHub {r.status_code}: {msg} ({r.request.method} {r.url}){hint}", response=r)
 
 
 class GitHub:
@@ -62,24 +80,24 @@ class GitHub:
         if r.status_code == 200:
             return
         if r.status_code != 404:
-            r.raise_for_status()
+            check(r)
         repo = self.s.get(self.repo_url, timeout=20)
-        repo.raise_for_status()
+        check(repo)
         default = repo.json()["default_branch"]
         ref = self.s.get(f"{self.repo_url}/git/ref/heads/{default}", timeout=20)
-        ref.raise_for_status()
+        check(ref)
         r = self.s.post(f"{self.repo_url}/git/refs", timeout=20, json={
             "ref": f"refs/heads/{self.branch}",
             "sha": ref.json()["object"]["sha"],
         })
-        r.raise_for_status()
+        check(r)
         print(f"Branch '{self.branch}' angelegt.")
 
     def get_sha(self, path):
         r = self.s.get(f"{self.repo_url}/contents/{path}", params={"ref": self.branch}, timeout=20)
         if r.status_code == 404:
             return None
-        r.raise_for_status()
+        check(r)
         return r.json()["sha"]
 
     def put(self, path, data, message, sha=None):
@@ -91,7 +109,7 @@ class GitHub:
         if sha:
             body["sha"] = sha
         r = self.s.put(f"{self.repo_url}/contents/{path}", json=body, timeout=60)
-        r.raise_for_status()
+        check(r)
         return r.json()["content"]["sha"]
 
 
@@ -101,12 +119,14 @@ class Uploader(threading.Thread):
     Nur dieser Thread verändert self.status – dadurch keine Race Conditions.
     """
 
-    def __init__(self, gh):
+    def __init__(self, gh, topic):
         super().__init__(daemon=True)
         self.gh = gh
+        self.topic = topic
         self.jobs = queue.Queue()
         self.status = {"state": "idle", "photos": []}
         self.status_sha = gh.get_sha(STATUS_PATH)
+        self.last_publish = 0.0
 
     def submit(self, fn, *args):
         self.jobs.put((fn, args))
@@ -137,6 +157,22 @@ class Uploader(threading.Thread):
             else:
                 raise
 
+    def publish(self, force=False):
+        """Schickt den Status live an die Webseite (gedrosselt, Fehler sind nicht fatal)."""
+        now = time.monotonic()
+        if not force and now - self.last_publish < PUBLISH_EVERY:
+            return
+        self.last_publish = now
+        data = json.dumps(self.status).encode("utf-8")
+        for attempt in range(3 if force else 1):  # Start/Ende sind wichtig -> wiederholen
+            try:
+                r = requests.post(f"{NTFY}/{self.topic}", data=data, timeout=10)
+                r.raise_for_status()
+                return
+            except requests.RequestException as e:
+                print(f"  Live-Update fehlgeschlagen: {e}")
+                time.sleep(1)
+
     def start_session(self, session, total, countdown_end):
         self.status = {
             "session": session,
@@ -145,7 +181,7 @@ class Uploader(threading.Thread):
             "total": total,
             "photos": [],
         }
-        self.write_status()
+        self.publish(force=True)
 
     def add_photo(self, local, remote):
         try:
@@ -157,9 +193,14 @@ class Uploader(threading.Thread):
         photos = self.status["photos"]
         if remote not in photos:
             photos.append(remote)
-        self.status["state"] = "done" if len(photos) >= self.status["total"] else "capturing"
-        self.write_status()
+        self.status["state"] = "capturing"
+        self.publish()
         print(f"  ↑ {remote} hochgeladen ({len(photos)}/{self.status['total']})")
+
+    def finish_session(self):
+        self.status["state"] = "done"
+        self.publish(force=True)
+        self.write_status()
 
 
 def open_camera(cfg):
@@ -202,6 +243,7 @@ def run_session(cam, up, cfg):
         time.sleep(max(0, next_shot - time.monotonic()))
 
     print("  Aufnahme fertig, warte auf restliche Uploads …")
+    up.submit(up.finish_session)
     up.jobs.join()
     print("  Alles hochgeladen ✔")
 
@@ -213,9 +255,11 @@ def main():
 
     cfg = load_config()
     gh = GitHub(cfg["token"], cfg["owner"], cfg["repo"], cfg["branch"])
-    gh.ensure_branch()
-
-    up = Uploader(gh)
+    try:
+        gh.ensure_branch()
+        up = Uploader(gh, cfg["ntfy_topic"])
+    except requests.RequestException as e:
+        raise SystemExit(f"Verbindung zu GitHub fehlgeschlagen:\n  {e}")
     up.start()
     cam = open_camera(cfg)
 

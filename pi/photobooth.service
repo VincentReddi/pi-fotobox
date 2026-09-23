@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 User=scoop1337
 WorkingDirectory=/home/scoop1337/pi-fotobox/pi
-ExecStart=/usr/bin/python3 -u /home/scoop1337/pi-fotobox/pi/photobooth.py
+ExecStart=/usr/bin/python3 -s -u/home/scoop1337/pi-fotobox/pi/photobooth.py
 Restart=on-failure
 RestartSec=5
 
